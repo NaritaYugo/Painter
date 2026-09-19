@@ -1,0 +1,107 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// 移動ぼかしフィルターレイヤー
+// ---------------------------------------------------------------------------
+// 「これより下のレイヤーの合成結果」に移動ぼかしをかける、非破壊フィルターレイヤー用。
+// 入出力ともキャンバス全面(canvasW x canvasH)の事前乗算アルファRGBA8で、
+// GLWidget::rebuildFilterChain() が合成の途中結果に対して呼ぶ。破壊的フィルター版
+// (paint/motionBlurFilter.comp)とサンプリングの理屈(経路上の等間隔平均)は同じだが、
+// 1レイヤーへ焼き込むのではなく chromaticAberrationLayer.comp / gaussianBlurLayer.comp
+// と同じく「不透明度×レイヤーマスク」の強さで元の合成結果へブレンドして仕上げる。
+//
+// 円形モードの中心(uCenterPx)は、特定のレイヤーに紐付かないフィルターレイヤーの
+// 性質上、GLWidget::applyFilterLayer側でキャンバスに対する比率(mbCenterU/V)から
+// キャンバスpx座標へ変換して渡す(色収差レイヤー版のuCenterPxと同じ扱い)。
+//
+// 入出力はキャンバス全面ちょうどなので、破壊的フィルター版のような
+// resolveCanvasSampleCoordによるタイルパディング除外は不要で、単純に画像境界へ
+// クランプすればよい(色収差レイヤー版と同じ)。破壊的フィルター版と同様、
+// キャンバスのループ(ラップ)には対応していない。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc; // ここまでの合成結果
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+
+uniform int   uMode;          // 0=平行, 1=円形
+uniform float uAngleRad;      // 平行モード: ぶれる向き(ラジアン)
+uniform float uDistancePx;    // 平行モード: ぶれる長さ(px)
+uniform vec2  uCenterPx;      // 円形モード: 回転中心(キャンバスpx座標)
+uniform float uAngleSpanRad;  // 円形モード: 振れ角(ラジアン)
+uniform int   uSamples;       // 経路上のサンプル数(C++側で距離に応じて決める)
+
+// 効果の強さ(フィルターレイヤーの不透明度)とレイヤーマスク。
+// 引き方は chromaticAberrationLayer.comp / gaussianBlurLayer.comp と同じ。
+uniform float uOpacity;
+uniform int   uMaskBase;          // このフィルターレイヤー自身のマスク(-1なら無し)
+uniform ivec4 uAncestorMaskBases; // 祖先フォルダー(最大4階層)のマスク(-1なら無し)
+uniform int   uTileSize;
+uniform int   uCanvasTilesX;
+
+#define MAX_BANKS 8
+uniform sampler2DArray layerTexBanks[MAX_BANKS];
+uniform int uSlicesPerBank;
+vec4 sampleTileArray(int si, vec2 uv) {
+    int bank = si / uSlicesPerBank;
+    float local = float(si - bank * uSlicesPerBank);
+    for (int b = 0; b < MAX_BANKS; b++)
+        if (b == bank) return textureLod(layerTexBanks[b], vec3(uv, local), 0.0);
+    return vec4(0.0);
+}
+
+float sampleMaskSlice(int base, ivec2 canvasPx) {
+    if (base < 0) return 1.0;
+    int tx = canvasPx.x / uTileSize;
+    int ty = canvasPx.y / uTileSize;
+    vec2 tileOrigin = vec2(tx * uTileSize, ty * uTileSize);
+    vec2 localUV = (vec2(canvasPx) + 0.5 - tileOrigin) / float(uTileSize);
+    return sampleTileArray(base + ty * uCanvasTilesX + tx, localUV).r;
+}
+
+float maskAlphaAt(ivec2 canvasPx) {
+    return sampleMaskSlice(uMaskBase, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.x, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.y, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.z, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.w, canvasPx);
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 origC = imageLoad(uSrc, c);
+
+    int  n = max(uSamples, 1);
+    vec4 accum = vec4(0.0);
+
+    if (uMode == 0) {
+        // 平行: cを中心に、uAngleRad方向へ ±uDistancePx/2
+        vec2 dir     = vec2(cos(uAngleRad), sin(uAngleRad));
+        vec2 halfVec = dir * (uDistancePx * 0.5);
+        for (int i = 0; i < n; i++) {
+            float t = (n > 1) ? (float(i) / float(n - 1) * 2.0 - 1.0) : 0.0;
+            ivec2 p = clamp(ivec2(round(vec2(c) + halfVec * t)), ivec2(0), sz - ivec2(1));
+            accum += imageLoad(uSrc, p);
+        }
+    } else {
+        // 円形: 中心まわりに ±uAngleSpanRad/2 だけ回した位置
+        vec2  rel = vec2(c) - uCenterPx;
+        float r   = length(rel);
+        float th0 = atan(rel.y, rel.x);
+        float halfSpan = uAngleSpanRad * 0.5;
+        for (int i = 0; i < n; i++) {
+            float t  = (n > 1) ? (float(i) / float(n - 1) * 2.0 - 1.0) : 0.0;
+            float th = th0 + halfSpan * t;
+            ivec2 p = clamp(ivec2(round(uCenterPx + vec2(cos(th), sin(th)) * r)), ivec2(0), sz - ivec2(1));
+            accum += imageLoad(uSrc, p);
+        }
+    }
+
+    vec4 blurred = accum / float(n);
+
+    float amount = clamp(uOpacity * maskAlphaAt(c), 0.0, 1.0);
+    imageStore(uDst, c, mix(origC, blurred, amount));
+}

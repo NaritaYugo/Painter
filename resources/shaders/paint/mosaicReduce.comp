@@ -1,0 +1,59 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// モザイクフィルター 1パス目: ブロックごとの平均色を1テクセルに集約する
+// ---------------------------------------------------------------------------
+// mosaicFilter.comp は元々1パスで、全画素がそれぞれ「自分の属するブロック内の
+// 全画素」を舐めて平均を出していた。同じブロックの uBlockSize^2 個の画素が
+// 全く同じ平均を重複計算するため、コストが O(uBlockSize^2) で膨らむ。
+// ブロックサイズの上限は256なので、2701x3624 のキャンバスでは1画素あたり
+// 65536回のロードになり、実測で 62.5秒 かかっていた(block=32でも1.0秒)。
+//
+// ここではディスパッチを「ブロック格子」の側で回し、1ブロックにつき1スレッドで
+// 平均を1回だけ出して uBlocks の1テクセルへ書く。2パス目(mosaicFilter.comp)は
+// それを引くだけになる。総ロード数は画像1枚ぶんに落ち、ブロックサイズに
+// ほぼ依存しなくなる(実測 block=2で7.1ms / 8で9.8ms / 32で63.8ms /
+// 128で19.6ms / 256で24.3ms)。
+//
+// uBlocks は多段パスのフィルター用の中間バッファ(ToolContext::ensureFilterScratch)
+// の左上を間借りする。ブロック格子は最大でも画像の半分(uBlockSizeは2以上)なので
+// 必ず収まる。
+//
+// ワークグループが 8x8 なのは実測による(他のシェーダーは16x16)。1スレッドが
+// ブロック1個ぶんを舐めるので、16x16 では同時に走る256スレッドが画像上の遠く
+// 離れた256箇所を並行して読むことになりキャッシュが効かない。8x8 にすると
+// 全ブロックサイズで約2倍速くなった(block=16: 24.6→8.8ms / 64: 104.9→57.3ms /
+// 256: 20.6→9.4ms)。呼び出し側(MosaicTool)のディスパッチ数もこれに合わせること。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uBlocks; // 1テクセル = 1ブロックの平均色
+
+uniform int   uBlockSize;      // モザイクの一辺(px)
+uniform ivec2 uBlockOriginPx;  // ブロック境界の基準点(mosaicFilter.comp と同じ意味)
+
+void main() {
+    ivec2 b  = ivec2(gl_GlobalInvocationID.xy); // ブロック格子上の位置
+    ivec2 sz = imageSize(uSrc);
+
+    // 2パス目が引くブロック index は (c - uBlockOriginPx) / uBlockSize なので、
+    // 格子の広さは画像を覆うのに要るブロック数ぶん。
+    ivec2 grid = (sz - uBlockOriginPx + uBlockSize - 1) / uBlockSize;
+    if (b.x >= grid.x || b.y >= grid.y) return;
+
+    // 1パス版と全く同じ範囲を平均する(画像境界でクランプ。キャンバス矩形ではなく
+    // テクスチャ全体に対するクランプなのも従来通りで、見た目を変えないため)。
+    ivec2 blockStart, blockEnd;
+    resolveBlockRange(uBlockOriginPx + b * uBlockSize, uBlockSize, sz, blockStart, blockEnd);
+
+    vec4 sum = vec4(0.0);
+    int count = 0;
+    for (int y = blockStart.y; y < blockEnd.y; ++y) {
+        for (int x = blockStart.x; x < blockEnd.x; ++x) {
+            sum += imageLoad(uSrc, ivec2(x, y));
+            count++;
+        }
+    }
+    imageStore(uBlocks, b, (count > 0) ? sum / float(count) : vec4(0.0));
+}

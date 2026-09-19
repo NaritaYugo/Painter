@@ -1,0 +1,112 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// ノイズフィルター (フィルターメニュー用、プレビュー→確定方式)
+// ---------------------------------------------------------------------------
+// 絵にざらざらした質感(フィルムグレイン)を足す。元の色をランダムな方向へ少しずらす
+// 加算方式にしてある(別レイヤーをオーバーレイ合成する方式と違い、元の明暗や色を
+// そのまま保ったまま粒状感だけを乗せられる)。
+//
+// ■ アルファの扱い
+// タイルは乗算済みアルファ(premultiplied)なので、いったんストレート色へ割り戻して
+// からノイズを足し、最後に掛け直す。アルファ自体には手を付けない。
+// これにより、
+//   ・半透明の部分は半透明のまま粒が乗る
+//   ・完全透明の部分は straight=0 にノイズを足しても最後に ×0 されるので透明のまま
+// となり、何も描いていない場所に粒が浮き出る(不自然なハロー)ことがない。
+//
+// ■ 乱数
+// スライダーを動かすたびにプレビューを作り直すので、乱数が毎回振り直されると
+// 粒がチラチラして調整できない。そこでピクセル座標とuSeedから決まる決定的な
+// ハッシュを使い、同じパラメータなら必ず同じ結果になるようにする
+// (uSeedはアクション開始時に1度だけ決める。開くたびに粒の出方は変わる)。
+// sin()を使う定番のハッシュはGPUによって精度差で縞が出ることがあるため、
+// 整数ビット演算ベースの質のよいハッシュ(lowbias32系)を使う。
+//
+// ■ 粒の大きさ
+// uGrainPx==1 のときは1ピクセルごとの独立した乱数(最も細かいグレイン)。
+// 2以上のときは uGrainPx ピクセル間隔の格子で乱数を取り、その間を滑らかに補間した
+// 値ノイズにする。単純に座標を割り算して量子化すると角ばった正方形のブロックに
+// 見えてしまうため、補間して有機的な粒にしている。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+
+uniform float uAmount;        // ノイズの最大振れ幅(ストレート色の 0..1 スケール)
+uniform int   uMonochrome;    // 1=モノクロ(RGB共通のずれ), 0=カラー(チャンネルごとに独立)
+uniform float uGrainPx;       // 粒の大きさ(px)
+uniform uint  uSeed;          // アクション開始時に決まる乱数の種
+uniform ivec2 uSelMaskOffset; // selMask(キャンバス座標)に対する、このレイヤー原点のオフセット
+
+// 整数ハッシュ(Chris Wellons の lowbias32 系)。乗算とシフトだけで良く撹拌される。
+uint hashU(uint x) {
+    x ^= x >> 16; x *= 0x7feb352du;
+    x ^= x >> 15; x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+// 格子点(p)とチャンネルから [0,1) の乱数を作る
+float hash01(ivec2 p, int channel) {
+    uint h = hashU(uint(p.x) * 73856093u ^ uint(p.y) * 19349663u
+                 ^ uint(channel) * 83492791u ^ uSeed);
+    return float(h) * (1.0 / 4294967296.0);
+}
+
+// 粒が2px以上のときに使う値ノイズ(格子の乱数をsmoothstepで補間)
+float valueNoise(vec2 p, int channel) {
+    vec2  i = floor(p);
+    vec2  f = fract(p);
+    vec2  u = f * f * (3.0 - 2.0 * f); // smoothstep 補間
+    ivec2 ii = ivec2(i);
+    float a = hash01(ii + ivec2(0, 0), channel);
+    float b = hash01(ii + ivec2(1, 0), channel);
+    float c = hash01(ii + ivec2(0, 1), channel);
+    float d = hash01(ii + ivec2(1, 1), channel);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// -1..+1 のノイズ
+float noiseSigned(ivec2 coord, int channel) {
+    float v = (uGrainPx <= 1.0)
+        ? hash01(coord, channel)                             // 1pxグレイン: 画素ごとに独立
+        : valueNoise(vec2(coord) / uGrainPx, channel);        // 粗いグレイン: 補間した値ノイズ
+    return v * 2.0 - 1.0;
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 orig = imageLoad(uSrc, c);
+
+    // 乗算済み -> ストレート色
+    vec3 straight = (orig.a > 0.0001) ? orig.rgb / orig.a : vec3(0.0);
+
+    vec3 n;
+    if (uMonochrome != 0) {
+        float m = noiseSigned(c, 0);
+        n = vec3(m); // RGB共通のずれ = 明暗だけが揺れる古典的なフィルムグレイン
+    } else {
+        n = vec3(noiseSigned(c, 0), noiseSigned(c, 1), noiseSigned(c, 2));
+    }
+
+    straight = clamp(straight + n * uAmount, 0.0, 1.0);
+
+    // ストレート -> 乗算済みへ戻す(アルファは変更しない)
+    vec4 noised = vec4(straight * orig.a, orig.a);
+
+    // 選択範囲でのブレンド。キャンバス外(selMaskの範囲外)は sel=0 のまま元の色を
+    // 返すので、レイヤーテクスチャ右端・下端のキャンバス外パディングには粒が入らない。
+    ivec2 selCoord = c + uSelMaskOffset;
+    ivec2 selSz = imageSize(selMask);
+    float sel = 0.0;
+    if (selCoord.x >= 0 && selCoord.y >= 0 && selCoord.x < selSz.x && selCoord.y < selSz.y)
+        sel = imageLoad(selMask, selCoord).r;
+
+    imageStore(uDst, c, mix(orig, noised, sel));
+}

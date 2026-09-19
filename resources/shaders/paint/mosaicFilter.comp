@@ -1,0 +1,43 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// モザイクフィルター 2パス目(フィルターメニュー用、ブラシ操作ではなく即時適用)
+// ---------------------------------------------------------------------------
+// mosaicReduce.comp が uBlocks へ書いた「ブロックごとの平均色」を1テクセル引いて、
+// gaussianBlurFilter.comp と同じく selMask で元画像とブレンドして uDst へ書き出す
+// (選択範囲があればその内部だけ、無ければ全域が255=そのままブレンド率100%になる)。
+// ブロック内の平均を各画素が重複計算していた頃との違いは mosaicReduce.comp のコメント参照。
+// レイヤーは pre-multiplied alpha なので、RGBAをそのまま平均してよい。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+layout(rgba8, binding = 3) uniform readonly  image2D uBlocks; // mosaicReduce.compの出力
+
+uniform int   uBlockSize;      // モザイクの一辺(px)
+uniform ivec2 uBlockOriginPx;  // ブロック境界の基準点(レイヤー原点=キャンバス座標)。
+                                // これが0でないと、レイヤーの原点位置によってブロックの
+                                // 割り付けがずれてしまう(見た目には影響しないが念のため)。
+uniform ivec2 uSelMaskOffset;  // selMask(キャンバス座標)に対する、このレイヤー原点のオフセット
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 orig = imageLoad(uSrc, c);
+
+    // このピクセルが属するブロックの平均色(mosaicReduce.comp が格子上の同じ位置へ
+    // 書いてある)。1パス版の blockStart0 の計算と同じ割り付け。
+    vec4 mosaicColor = imageLoad(uBlocks, (c - uBlockOriginPx) / uBlockSize);
+
+    ivec2 selCoord = c + uSelMaskOffset;
+    ivec2 selSz = imageSize(selMask);
+    float sel = 0.0;
+    if (selCoord.x >= 0 && selCoord.y >= 0 && selCoord.x < selSz.x && selCoord.y < selSz.y)
+        sel = imageLoad(selMask, selCoord).r;
+
+    imageStore(uDst, c, mix(orig, mosaicColor, sel));
+}

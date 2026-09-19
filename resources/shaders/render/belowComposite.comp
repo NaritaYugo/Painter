@@ -1,0 +1,247 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// belowComposite.comp
+// ---------------------------------------------------------------------------
+// レイヤー範囲 [uTargetStart, uTargetEnd] をキャンバス全体ぶん合成し、
+// resultとclipBase(直近の非クリッピングレイヤーの色)の両方を出力する。
+// render.frag と全く同じ合成アルゴリズム(composite.comp と共通)。
+//
+// 使われ方は2つある:
+//  (1) ストローク中の事前合成キャッシュ (GLWidget::updateBelowCompositeCache /
+//      updateAboveCompositeCache)。ストローク開始時に一度だけ走り、render.frag は
+//      その結果を「z=アクティブレイヤーから始める合成」の初期値として使う。
+//  (2) フィルターレイヤーの連鎖 (GLWidget::rebuildFilterChain)。フィルターレイヤーは
+//      近傍参照なので合成ループの中では計算できず、そこで一度合成を打ち切って
+//      オフスクリーンへ出す必要がある。連鎖の2段目以降は「前の段の結果から続きを
+//      合成する」ことになるため、uUseInit!=0 で初期値テクスチャを受け取れる。
+//
+// (2)ではアクティブレイヤーがこの範囲に入りうる(フィルターレイヤーより下に描いて
+// いる場合)。そのときストローク中の線はまだ maskTex にあるだけでタイルには
+// 焼かれていないので、uPaintPreview!=0 のときだけ render.frag と同じライブ
+// プレビューをここでも重ねる。そうしないと「描いている線が画面に出ない」。
+// 変形やフィルターアクションのプレビューはここでは扱わない(それらはツール入力を
+// ブロックするアクションで、GLWidget側がその間フィルター連鎖を止めて
+// render.frag のプレビュー経路へ戻すため)。
+// ---------------------------------------------------------------------------
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0, rgba8) uniform writeonly image2D outResultTex;   // canvasW x canvasH
+layout(binding = 1, rgba8) uniform writeonly image2D outClipBaseTex; // canvasW x canvasH
+// 連鎖の途中から始めるための初期値(uUseInit!=0のときだけ読む)。
+layout(binding = 2, rgba8) uniform readonly image2D inResultTex;
+layout(binding = 3, rgba8) uniform readonly image2D inClipBaseTex;
+// ライブプレビュー用(uPaintPreview!=0のときだけ読む)。render.frag の
+// maskTex / selectionMaskTex と同じもの。
+layout(binding = 4, r8)    uniform readonly image2D brushMaskTex;
+layout(binding = 5, r8)    uniform readonly image2D selMaskTex;
+
+// タイル配列は複数「バンク」へ分割(composite.comp と同じ。MAX_BANKS は
+// CanvasDocument.h の MAX_TILE_BANKS と一致させること)。
+#define MAX_BANKS 8
+uniform sampler2DArray layerTexBanks[MAX_BANKS];
+uniform int uSlicesPerBank;
+vec4 sampleTileArray(int si, vec2 uv) {
+    int bank = si / uSlicesPerBank;
+    float local = float(si - bank * uSlicesPerBank);
+    for (int b = 0; b < MAX_BANKS; b++)
+        if (b == bank) return textureLod(layerTexBanks[b], vec3(uv, local), 0.0);
+    return vec4(0.0);
+}
+
+// 調整レイヤーの色調整本体(composite.compのadjustLayerColorと同じ。詳細はそちらの
+// コメント参照)。
+vec3 adjustLayerColor(int kind, vec3 rgb, vec3 p, int baseSlice) {
+    if (kind == 1) return adjustBrightnessContrast(rgb, p.x, p.y);
+    if (kind == 2) return adjustHSL(rgb, p.x, p.y, p.z);
+    if (kind == 4) return adjustColorBalance(rgb, p.x, p.y, p.z);
+    if (kind == 5) {
+        if (baseSlice < 0) return rgb;
+        return vec3(
+            sampleTileArray(baseSlice, vec2(clamp(rgb.r, 0.0, 1.0), 0.5 / 256.0)).r,
+            sampleTileArray(baseSlice, vec2(clamp(rgb.g, 0.0, 1.0), 0.5 / 256.0)).r,
+            sampleTileArray(baseSlice, vec2(clamp(rgb.b, 0.0, 1.0), 0.5 / 256.0)).r
+        );
+    }
+    if (kind == 6) {
+        if (baseSlice < 0) return rgb;
+        return sampleTileArray(baseSlice, vec2(clamp(blendLuma(rgb), 0.0, 1.0), 0.5 / 256.0)).rgb;
+    }
+    return rgb;
+}
+
+uniform int uLayerCount;
+uniform int uTargetStart; // 合成する下限レイヤーindex(既定0)。「上レイヤー事前合成」ではactive+1を渡す。
+uniform int uTargetEnd; // 合成する上限レイヤーindex(uTargetStart..uTargetEnd、両端含む)。負値なら空扱い。
+uniform int uTileSize;
+uniform int uCanvasTilesX; // キャンバス全体のタイル数(横)。マスクのタイル参照に使う
+uniform int uUseInit;      // 0=空から / 1=inResultTex,inClipBaseTexから始める
+
+// ライブプレビュー(render.frag の同名uniformと同じ意味)
+uniform int  uPaintPreview;        // 0=プレビューしない(従来の使われ方)
+uniform int  uActiveLayerIndex;
+// 「消す」モード。bake.comp/render.fragのuEraseModeと同じ意味で、
+// 削る強さも同じくuBrushColor.aから読む。
+uniform int  uEraseMode;
+// ブラシの合成モード(bake.comp/render.fragのuBrushBlendModeと同じ)。
+uniform int  uBrushBlendMode;
+// ストローク色バッファ(stroke.comp参照)。uUseStrokeColor==0のときはバインドされない。
+layout(rgba16f, binding = 6) uniform readonly image2D strokeColorTex;
+uniform int  uUseStrokeColor;
+uniform int  uIsEditingMaskLayer;
+uniform vec4 uBrushColor;
+uniform vec4 uMaskBrushColor;
+uniform int  uHasSelection;
+
+layout(std430, binding = 4) readonly buffer LayerOpacityBuf   { float uLayerOpacity[]; };
+layout(std430, binding = 5) readonly buffer LayerVisibleBuf   { int   uLayerVisible[]; };
+layout(std430, binding = 6) readonly buffer LayerBaseSliceBuf { int   uLayerBaseSlice[]; };
+layout(std430, binding = 1) readonly buffer LayerMaskBaseSliceBuf { int uLayerMaskBaseSlice[]; };
+layout(std430, binding = 2) readonly buffer LayerAncestorMaskSlicesBuf { ivec4 uLayerAncestorMaskSlices[]; };
+layout(std430, binding = 7) readonly buffer LayerBlendModeBuf { int   uLayerBlendMode[]; };
+layout(std430, binding = 8) readonly buffer LayerClippingBuf  { int   uLayerClipping[]; };
+layout(std430, binding = 9)  readonly buffer LayerOriginTxBuf { int   uLayerOriginTx[]; };
+layout(std430, binding = 10) readonly buffer LayerOriginTyBuf { int   uLayerOriginTy[]; };
+layout(std430, binding = 11) readonly buffer LayerTilesXBuf   { int   uLayerTilesX[]; };
+layout(std430, binding = 12) readonly buffer LayerTilesYBuf   { int   uLayerTilesY[]; };
+layout(std430, binding = 13) readonly buffer LayerIsSolidColorBuf { int   uLayerIsSolidColor[]; };
+layout(std430, binding = 0)  readonly buffer LayerSolidColorBuf { vec4 uLayerSolidColor[]; };
+// 0=どちらでもない, 1=明るさ・コントラスト, 2=色相・彩度・明度, 3=フィルターレイヤー
+// (フィルターレイヤーは合成ループでは何もせず読み飛ばす。効果は連鎖側で別途かかる)
+layout(std430, binding = 14) readonly buffer LayerAdjKindBuf   { int  uLayerAdjKind[]; };
+layout(std430, binding = 15) readonly buffer LayerAdjParamsBuf { vec3 uLayerAdjParams[]; };
+
+// キャンバスピクセル座標からレイヤーzのタイルUVWを求める(render.frag の
+// canvasUVToTile と同じロジックだが、入力がUVではなくピクセル座標)。
+bool sampleLayerTile(ivec2 canvasPx, int z, out int outSi, out vec2 outUV) {
+    int tx = canvasPx.x / uTileSize;
+    int ty = canvasPx.y / uTileSize;
+    int localTx = tx - uLayerOriginTx[z];
+    int localTy = ty - uLayerOriginTy[z];
+    if (localTx < 0 || localTx >= uLayerTilesX[z] || localTy < 0 || localTy >= uLayerTilesY[z])
+        return false;
+
+    vec2 tileOrigin = vec2(tx * uTileSize, ty * uTileSize);
+    outUV = (vec2(canvasPx) + 0.5 - tileOrigin) / float(uTileSize);
+    outSi = uLayerBaseSlice[z] + localTy * uLayerTilesX[z] + localTx;
+    return true;
+}
+
+// composite.comp の maskAlphaOf と同じ(マスクは原点(0,0)固定・キャンバス全体サイズ)。
+float sampleMaskSlice(int base, ivec2 canvasPx) {
+    if (base < 0) return 1.0;
+    int tx = canvasPx.x / uTileSize;
+    int ty = canvasPx.y / uTileSize;
+    vec2 tileOrigin = vec2(tx * uTileSize, ty * uTileSize);
+    vec2 localUV = (vec2(canvasPx) + 0.5 - tileOrigin) / float(uTileSize);
+    int si = base + ty * uCanvasTilesX + tx;
+    return sampleTileArray(si, localUV).r;
+}
+
+// 選択範囲(未選択なら全域1.0)。render.frag の sampleSelMask と同じ。
+float selMaskAt(ivec2 px) {
+    if (uHasSelection == 0) return 1.0;
+    return imageLoad(selMaskTex, px).r;
+}
+
+// 未確定のマスクストロークを乗せる(render.frag の applyMaskStroke と同じ式)。
+float applyMaskStroke(float own, ivec2 px, float brushMask) {
+    float m = brushMask * selMaskAt(px);
+    return clamp(uMaskBrushColor.r * m + own * (1.0 - uMaskBrushColor.a * m), 0.0, 1.0);
+}
+
+float sampleMaskSlicePreview(int base, ivec2 px, float brushMask, bool editing) {
+    float m = sampleMaskSlice(base, px);
+    if (editing && base >= 0 && base == uLayerMaskBaseSlice[uActiveLayerIndex])
+        m = applyMaskStroke(m, px, brushMask);
+    return m;
+}
+
+float maskAlphaOf(int z, ivec2 canvasPx, float brushMask) {
+    // マスク編集中のライブプレビューは、プレビューが有効なときだけ乗せる。
+    bool editing = (uPaintPreview != 0 && uIsEditingMaskLayer != 0);
+    ivec4 anc = uLayerAncestorMaskSlices[z];
+    return sampleMaskSlicePreview(uLayerMaskBaseSlice[z], canvasPx, brushMask, editing)
+         * sampleMaskSlicePreview(anc.x, canvasPx, brushMask, editing)
+         * sampleMaskSlicePreview(anc.y, canvasPx, brushMask, editing)
+         * sampleMaskSlicePreview(anc.z, canvasPx, brushMask, editing)
+         * sampleMaskSlicePreview(anc.w, canvasPx, brushMask, editing);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 canvasSize = imageSize(outResultTex);
+    if (px.x >= canvasSize.x || px.y >= canvasSize.y) return;
+
+    vec4 result   = (uUseInit != 0) ? imageLoad(inResultTex,   px) : vec4(0.0);
+    vec4 clipBase = (uUseInit != 0) ? imageLoad(inClipBaseTex, px) : vec4(0.0);
+
+    float brushMask = (uPaintPreview != 0) ? imageLoad(brushMaskTex, px).r : 0.0;
+
+    int endZ = min(uLayerCount - 1, uTargetEnd);
+    for (int z = max(0, uTargetStart); z <= endZ; z++) {
+        // フィルターレイヤーは合成ループでは何もしない(効果は連鎖側でかかる)。
+        // 調整レイヤーと同じくクリップの区切りにもならないので clipBase は触らない。
+        if (uLayerAdjKind[z] == 3) continue;
+
+        if (uLayerVisible[z] == 0) {
+            if (uLayerClipping[z] == 0) clipBase = vec4(0.0);
+            continue;
+        }
+
+        if (uLayerAdjKind[z] != 0) {
+            vec3 rgb = safeUnpremul(result.rgb, result.a);
+            vec3 adjusted = adjustLayerColor(uLayerAdjKind[z], rgb, uLayerAdjParams[z], uLayerBaseSlice[z]);
+            float m = maskAlphaOf(z, px, brushMask);
+            result.rgb = mix(rgb, adjusted, uLayerOpacity[z] * m) * result.a;
+            continue;
+        }
+
+        vec4 c;
+        if (uLayerIsSolidColor[z] != 0) {
+            vec4 sc = uLayerSolidColor[z];
+            c = vec4(sc.rgb * sc.a, sc.a);
+        } else {
+            int si; vec2 uv;
+            bool inLayer = sampleLayerTile(px, z, si, uv);
+            c = inLayer ? sampleTileArray(si, uv) : vec4(0.0);
+        }
+        c.rgb *= uLayerOpacity[z];
+        c.a   *= uLayerOpacity[z];
+        float maskA = maskAlphaOf(z, px, brushMask);
+        c.rgb *= maskA;
+        c.a   *= maskA;
+
+        // アクティブレイヤーのライブプレビュー(render.frag の同じ処理の、
+        // ペン/消しゴム/マスク編集だけに絞った版)。
+        if (uPaintPreview != 0 && z == uActiveLayerIndex && uLayerIsSolidColor[z] == 0) {
+            if (uIsEditingMaskLayer != 0) {
+                // マスク編集中は色を重ねない(maskAlphaOf 側で反映済み)。
+            } else {
+                // 焼き込み(bake.comp)・render.fragと同じ関数を使う(common.glsl)。
+                // 選択範囲マスクを掛けるのも同じ理由(掛けないとこの経路のプレビューだけ
+                // 選択範囲の外へはみ出す)。
+                float sel = selMaskAt(px);
+                vec3 strokeRGB = (uUseStrokeColor != 0)
+                               ? imageLoad(strokeColorTex, px).rgb * sel : vec3(0.0);
+                c = applyStrokeToPixel(c, uBrushColor, brushMask * sel,
+                                       strokeRGB, uUseStrokeColor,
+                                       uEraseMode, uBrushBlendMode, uLayerOpacity[z],
+                                       vec2(px));
+            }
+        }
+
+        if (uLayerClipping[z] != 0) {
+            c.rgb *= clipBase.a;
+            c.a   *= clipBase.a;
+        } else {
+            clipBase = c;
+        }
+
+        result = applyBlend(result, c, uLayerBlendMode[z], vec2(px) + 0.5);
+    }
+
+    imageStore(outResultTex, px, result);
+    imageStore(outClipBaseTex, px, clipBase);
+}

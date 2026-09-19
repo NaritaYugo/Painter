@@ -1,0 +1,39 @@
+#version 430 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// RG16F: xy = 最寄り壁ピクセルの座標 (未初期化は -1,-1)
+layout(rg16f, binding = 3) uniform image2D jfaTex;
+
+uniform int uStep; // JFA のステップ幅 (最初は N/2, 毎パス半分)
+
+void main() {
+    ivec2 coord   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize = imageSize(jfaTex);
+    if (coord.x >= texSize.x || coord.y >= texSize.y) return;
+
+    vec2  bestSeed = imageLoad(jfaTex, coord).xy;
+    float bestDist = (bestSeed.x < 0.0)
+        ? 1e9
+        : length(vec2(coord) - bestSeed);
+
+    // 3x3 近傍を step 幅でサンプリング
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            ivec2 nc = coord + ivec2(dx, dy) * uStep;
+            if (nc.x < 0 || nc.x >= texSize.x ||
+                nc.y < 0 || nc.y >= texSize.y) continue;
+
+            vec2  seed = imageLoad(jfaTex, nc).xy;
+            if (seed.x < 0.0) continue;
+
+            float d = length(vec2(coord) - seed);
+            if (d < bestDist) {
+                bestDist = d;
+                bestSeed = seed;
+            }
+        }
+    }
+
+    imageStore(jfaTex, coord, vec4(bestSeed, 0.0, 0.0));
+}

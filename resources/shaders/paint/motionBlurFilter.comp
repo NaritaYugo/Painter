@@ -1,0 +1,106 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// 移動ぼかしフィルター (フィルターメニュー用、プレビュー→確定方式)
+// ---------------------------------------------------------------------------
+// 「被写体(またはカメラ)が露光中に動いた」ときの軌跡を再現する。出力ピクセルcの色を、
+// 移動経路上に等間隔で取ったサンプルの平均にする(=経路方向にだけ伸びるぼけになる)。
+//
+// 経路の作り方は2種類:
+//   uMode == 0 (平行): uAngleRad方向の直線。cを中心に ±uDistancePx/2 の範囲を等間隔で
+//                      サンプルする(中心対称にすることで、ぼけても絵が片側へずれない)。
+//   uMode == 1 (円形): uCenterPx を中心とする円弧。cの中心からの距離rと偏角θを求め、
+//                      θを ±uAngleSpanRad/2 の範囲で振った点をサンプルする(=中心の
+//                      まわりに回転したような、回転ぶれのぼけになる)。回す角度を
+//                      固定にすると外周ほど移動量が大きくなり、実際の回転ぶれと同じ
+//                      見た目になる。
+//
+// アルファ合成の注意:
+// タイルの中身は乗算済みアルファ(premultiplied)なので、単純に平均するだけで
+// 正しい「部分的に覆われた」結果になる(ストレート色を平均すると透明部分の色
+// (=0)が混ざって暗くなってしまう。乗算済みならRGBもAも同じ割合で薄まるので、
+// 表示時に割り戻せば元の色相・明度が保たれる)。
+//
+// 選択範囲(selMask)で元画像とブレンドしてuDstへ書き出すのは他のフィルター
+// (mosaicFilter.comp / chromaticAberrationFilter.comp 等)と同じ。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+
+uniform int   uMode;          // 0=平行, 1=円形
+uniform float uAngleRad;      // 平行モード: ぶれる向き(ラジアン)
+uniform float uDistancePx;    // 平行モード: ぶれる長さ(px)
+uniform vec2  uCenterPx;      // 円形モード: 回転中心(レイヤーローカルpx座標)
+uniform float uAngleSpanRad;  // 円形モード: 振れ角(ラジアン)
+uniform int   uSamples;       // 経路上のサンプル数(奇数。C++側で距離に応じて決める)
+uniform ivec2 uSelMaskOffset; // selMask(キャンバス座標)に対する、このレイヤー原点のオフセット
+
+// 範囲外サンプルの扱い(縁が白っぽくなる問題への対策):
+// 有効なサンプル範囲は「テクスチャ全体」ではなく「キャンバス矩形」。uSrcはレイヤーの
+// タイル境界に合わせたサイズなので、テクスチャの右端・下端にはキャンバス外の完全透明な
+// パディングが最大255px残っており、これを平均に巻き込むと縁のアルファが落ちて
+// 下地が透けてしまう(詳細は common.glsl の resolveCanvasSampleCoord のコメント参照)。
+// 範囲外サンプルは加算にも分母にも一切数えず、有効サンプルだけで正規化する。
+// 戻り値: 範囲内なら true を返し、色を outColor へ入れる。
+bool fetch(ivec2 sz, vec2 p, out vec4 outColor) {
+    ivec2 s;
+    // 移動ぼかしはキャンバスのループ(ラップ)には対応していないので false,false を渡す。
+    if (!resolveCanvasSampleCoord(ivec2(round(p)), uSelMaskOffset, imageSize(selMask), sz,
+                                  false, false, s)) {
+        outColor = vec4(0.0);
+        return false;
+    }
+    outColor = imageLoad(uSrc, s);
+    return true;
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 origC = imageLoad(uSrc, c);
+
+    int  n = max(uSamples, 1);
+    vec4 accum = vec4(0.0);
+    int  valid = 0;    // 範囲内だったサンプルの数(これで割る。上のfetch()のコメント参照)
+    vec4 s;
+
+    if (uMode == 0) {
+        // 平行: cを中心に、uAngleRad方向へ ±uDistancePx/2
+        // (halfはGLSLの予約語なので変数名に使えない)
+        vec2 dir     = vec2(cos(uAngleRad), sin(uAngleRad));
+        vec2 halfVec = dir * (uDistancePx * 0.5);
+        for (int i = 0; i < n; i++) {
+            // t: -1 .. +1 (n==1 のときは 0)
+            float t = (n > 1) ? (float(i) / float(n - 1) * 2.0 - 1.0) : 0.0;
+            if (fetch(sz, vec2(c) + halfVec * t, s)) { accum += s; valid++; }
+        }
+    } else {
+        // 円形: 中心まわりに ±uAngleSpanRad/2 だけ回した位置
+        vec2  rel = vec2(c) - uCenterPx;
+        float r   = length(rel);
+        float th0 = atan(rel.y, rel.x);
+        float halfSpan = uAngleSpanRad * 0.5;
+        for (int i = 0; i < n; i++) {
+            float t  = (n > 1) ? (float(i) / float(n - 1) * 2.0 - 1.0) : 0.0;
+            float th = th0 + halfSpan * t;
+            if (fetch(sz, uCenterPx + vec2(cos(th), sin(th)) * r, s)) { accum += s; valid++; }
+        }
+    }
+
+    // 自分自身(t=0)は必ず範囲内なのでvalidは通常1以上だが、丸め誤差の保険として
+    // 0のときは元の色をそのまま使う。
+    vec4 blurred = (valid > 0) ? (accum / float(valid)) : origC;
+
+    ivec2 selCoord = c + uSelMaskOffset;
+    ivec2 selSz = imageSize(selMask);
+    float sel = 0.0;
+    if (selCoord.x >= 0 && selCoord.y >= 0 && selCoord.x < selSz.x && selCoord.y < selSz.y)
+        sel = imageLoad(selMask, selCoord).r;
+
+    imageStore(uDst, c, mix(origC, blurred, sel));
+}

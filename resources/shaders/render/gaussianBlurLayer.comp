@@ -1,0 +1,108 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// ガウスぼかしフィルターレイヤー
+// ---------------------------------------------------------------------------
+// 「これより下のレイヤーの合成結果」をぼかす、非破壊フィルターレイヤー用。
+// 入出力ともキャンバス全面(canvasW x canvasH)の事前乗算アルファRGBA8で、
+// GLWidget::rebuildFilterChain() が合成の途中結果に対して呼ぶ。色収差レイヤー版
+// (chromaticAberrationLayer.comp)と対になる、もう1つのフィルターレイヤー実装。
+//
+// 2次元ガウスは G(x,y)=G(x)*G(y) と分離できるので、破壊的フィルター版
+// (paint/gaussianBlurFilter.comp)と同じく「横1D→縦1D」の2パスに分ける
+// (呼び出し側 GLWidget::applyFilterLayer がuDirを変えて2回ディスパッチする)。
+//   1パス目 uFinalPass=0: 素の横ぼかしを中間バッファ(filterChainBlurScratch_)へ書く
+//   2パス目 uFinalPass=1: その中間バッファを縦にぼかし、uOrig(ぼかす前の合成結果)と
+//                         色収差レイヤー版と同じ式で「不透明度×レイヤーマスク」の
+//                         強さだけ混ぜて仕上げる(マスクを黒く塗ったところはぼけない)。
+//
+// 色収差レイヤー版と違い、この用途のテクスチャは常にキャンバス全面ちょうどで
+// タイル境界の透明パディングが無い(破壊的フィルター版はレイヤーテクスチャの
+// 右端・下端にキャンバス外の透明パディングが残るため、そこを平均に混ぜないよう
+// 明示的に除外する必要があった)。ここでは単純に画像境界へクランプ
+// (=端のピクセルを延長)すればよく、resolveCanvasSampleCoordのような
+// 有効サンプル正規化は不要。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;  // 1パス目: 元の合成結果 / 2パス目: 横ぼかし済み中間結果
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(rgba8, binding = 2) uniform readonly  image2D uOrig; // 2パス目のみ参照: ぼかす前の合成結果(ブレンド用)
+
+uniform int   uKernelRadius;
+uniform float uSigma;
+uniform ivec2 uDir;       // (1,0)=横パス / (0,1)=縦パス
+uniform int   uFinalPass; // 0=横ぼかしのみ書く / 1=縦ぼかし+不透明度・マスクでブレンドして仕上げる
+uniform int   uWrapX;     // キャンバスの左右ループが有効か
+uniform int   uWrapY;     // キャンバスの上下ループが有効か
+
+// 効果の強さ(フィルターレイヤーの不透明度)とレイヤーマスク。
+// 引き方は chromaticAberrationLayer.comp / belowComposite.comp の
+// sampleMaskSlice と同じ(マスクは原点(0,0)固定・キャンバス全体サイズ)。
+uniform float uOpacity;
+uniform int   uMaskBase;          // このフィルターレイヤー自身のマスク(-1なら無し)
+uniform ivec4 uAncestorMaskBases; // 祖先フォルダー(最大4階層)のマスク(-1なら無し)
+uniform int   uTileSize;
+uniform int   uCanvasTilesX;
+
+#define MAX_BANKS 8
+uniform sampler2DArray layerTexBanks[MAX_BANKS];
+uniform int uSlicesPerBank;
+vec4 sampleTileArray(int si, vec2 uv) {
+    int bank = si / uSlicesPerBank;
+    float local = float(si - bank * uSlicesPerBank);
+    for (int b = 0; b < MAX_BANKS; b++)
+        if (b == bank) return textureLod(layerTexBanks[b], vec3(uv, local), 0.0);
+    return vec4(0.0);
+}
+
+float sampleMaskSlice(int base, ivec2 canvasPx) {
+    if (base < 0) return 1.0;
+    int tx = canvasPx.x / uTileSize;
+    int ty = canvasPx.y / uTileSize;
+    vec2 tileOrigin = vec2(tx * uTileSize, ty * uTileSize);
+    vec2 localUV = (vec2(canvasPx) + 0.5 - tileOrigin) / float(uTileSize);
+    return sampleTileArray(base + ty * uCanvasTilesX + tx, localUV).r;
+}
+
+float maskAlphaAt(ivec2 canvasPx) {
+    return sampleMaskSlice(uMaskBase, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.x, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.y, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.z, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.w, canvasPx);
+}
+
+ivec2 wrapOrClamp(ivec2 p, ivec2 sz) {
+    if (uWrapX != 0) p.x = ((p.x % sz.x) + sz.x) % sz.x;
+    else             p.x = clamp(p.x, 0, sz.x - 1);
+    if (uWrapY != 0) p.y = ((p.y % sz.y) + sz.y) % sz.y;
+    else             p.y = clamp(p.y, 0, sz.y - 1);
+    return p;
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4  sum  = vec4(0.0);
+    float wsum = 0.0;
+    float twoSigmaSq = 2.0 * uSigma * uSigma;
+    for (int d = -uKernelRadius; d <= uKernelRadius; ++d) {
+        ivec2 s = wrapOrClamp(c + uDir * d, sz);
+        float w = exp(-float(d*d) / twoSigmaSq);
+        sum  += imageLoad(uSrc, s) * w;
+        wsum += w;
+    }
+    vec4 blurred = (wsum > 0.0) ? sum / wsum : imageLoad(uSrc, c);
+
+    if (uFinalPass == 0) {
+        imageStore(uDst, c, blurred);
+        return;
+    }
+
+    vec4 orig = imageLoad(uOrig, c);
+    float amount = clamp(uOpacity * maskAlphaAt(c), 0.0, 1.0);
+    imageStore(uDst, c, mix(orig, blurred, amount));
+}

@@ -1,0 +1,19 @@
+#version 430 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+// レイヤーのタイルは常に連続したスライス範囲として確保される(CanvasDocument::addLayer
+// 参照)ため、layerTexArray全体を層(layered)バインドし、uBaseSliceからの連続count枚を
+// 1回のディスパッチ(z = count)でまとめてクリアする(CPU側でのゼロ埋めバッファ転送を
+// 発生させないため)。
+layout(rgba8, binding = 1) uniform image2DArray layerTexArr;
+
+uniform vec4 uClearColor;
+uniform int  uBaseSlice;
+
+void main() {
+    ivec2 texCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec3 texSize = imageSize(layerTexArr);
+    if (texCoord.x >= texSize.x || texCoord.y >= texSize.y) return;
+
+    imageStore(layerTexArr, ivec3(texCoord, uBaseSlice + int(gl_GlobalInvocationID.z)), uClearColor);
+}

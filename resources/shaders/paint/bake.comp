@@ -1,0 +1,62 @@
+#version 430 core
+//COMMON_INCLUDE
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(r8,    binding = 0) uniform readonly image2D maskTex;     // canvasW x canvasH
+layout(rgba8, binding = 1) uniform image2D          fullLayerTex; // canvasW x canvasH (作業用)
+layout(r8,    binding = 2) uniform readonly image2D selMask;     // canvasW x canvasH (選択範囲。未選択時は全域255)
+// ストローク色バッファ(stroke.comp参照)。uUseStrokeColor==0のときはバインドされない。
+layout(rgba16f, binding = 3) uniform readonly image2D strokeColorTex;
+uniform int  uUseStrokeColor;
+
+// ブラシ色。必ず「事前乗算済み(rgb = 色 × 不透明度, a = 不透明度)」で渡すこと。
+// マスクは「このブラシの全力のうち、この画素にどれだけ乗るか」(0〜1)を表すので、
+// 掛けるだけで premultiplied のまま正しい src になる(実効アルファ = 不透明度 × mask)。
+uniform vec4 uBrushColor;
+
+// 「消す」モード(消しゴムツール、またはペン等で透明色を選んでいるとき)。
+// 1のとき、色を塗る代わりにアルファを削る。削る強さは uBrushColor.a で、
+// 1.0なら完全に消え、小さいほど消えにくい(ToolConfig.h の EraseBrush 参照)。
+//
+// 以前はこのフラグが無く、uBrushColor==vec4(0) を消しゴムの合図にしていた。
+// そのため「不透明度0%の色」がそのまま消しゴムとして働いてしまい、本来
+// 「何も描かない」であるべき設定が破壊的な動作になっていた。
+// 明示的なフラグにしたので、uEraseMode==0 かつ不透明度0なら
+// normalBlend(dst, 0) = dst となり、期待どおり何も起きない。
+//
+// bake.comp を使う側(PenEraserTool/AirbrushTool/FillTool)はプログラムを共有して
+// いるため、消さない場合も必ず0を明示的に設定すること。
+uniform int  uEraseMode;
+
+// ブラシの合成モード(BlendModeの整数値。0=普通)。レイヤーの合成モードと同じ一覧で、
+// ストロークをレイヤーへ焼き込むときの合成方法を決める。
+// bake.comp を使う側はプログラムを共有しているため、普通の場合も必ず0を明示すること。
+uniform int  uBrushBlendMode;
+// 部分焼き込み用のディスパッチ起点(既定(0,0)。エアブラシのようにスタンプ1つずつ
+// 影響範囲だけをbakeしたい呼び出し側が設定する。Pen等の全域bakeは未設定のままでよい)。
+uniform ivec2 uDispatchOrigin;
+
+void main() {
+    ivec2 texCoord = uDispatchOrigin + ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize  = imageSize(fullLayerTex);
+    if (texCoord.x < 0 || texCoord.y < 0 || texCoord.x >= texSize.x || texCoord.y >= texSize.y) return;
+
+    // 選択範囲外は乗算で0になり、以降のmask>0.0判定で自然に弾かれる
+    // (選択が無いときはselMaskが全域1.0なので挙動は変わらない)
+    float sel  = imageLoad(selMask, texCoord).r;
+    float mask = imageLoad(maskTex, texCoord).r * sel;
+    vec4  dst  = imageLoad(fullLayerTex, texCoord);
+    // 色バッファも選択範囲を同じだけ掛ける(applyStrokeToPixelの約束)
+    vec3  strokeRGB = (uUseStrokeColor != 0)
+                    ? imageLoad(strokeColorTex, texCoord).rgb * sel : vec3(0.0);
+
+    // ストロークを1画素へ乗せる式は common.glsl の applyStrokeToPixel に集約してある
+    // (ライブプレビュー側の render.frag / belowComposite.comp と同じ関数を使う)。
+    // ここは焼き込みなので、レイヤー不透明度はまだ掛かっていない = 1.0 を渡す。
+    // ディザ合成が画素位置を使うので、キャンバス座標をそのまま渡す。
+    if (mask > 0.0) {
+        imageStore(fullLayerTex, texCoord,
+                   applyStrokeToPixel(dst, uBrushColor, mask, strokeRGB, uUseStrokeColor,
+                                      uEraseMode, uBrushBlendMode, 1.0, vec2(texCoord)));
+    }
+}

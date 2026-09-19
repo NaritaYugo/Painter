@@ -1,0 +1,113 @@
+<RCC>
+    <qresource prefix="/">
+        <file>shaders/header/common.glsl</file>
+
+        <file>shaders/paint/stroke.comp</file>
+        <file>shaders/paint/bake.comp</file>
+        <file>shaders/paint/brushState.comp</file>
+        <file>shaders/paint/layerclear.comp</file>
+        <file>shaders/paint/maskclear.comp</file>
+        <file>shaders/paint/blur.comp</file>
+        <file>shaders/paint/gaussianBlurFilter.comp</file>
+        <file>shaders/paint/mosaicReduce.comp</file>
+        <file>shaders/paint/mosaicFilter.comp</file>
+        <file>shaders/paint/motionBlurFilter.comp</file>
+        <file>shaders/paint/noiseFilter.comp</file>
+        <file>shaders/paint/chromaticAberrationFilter.comp</file>
+        <file>shaders/paint/lensBlurFilter.comp</file>
+        <file>shaders/paint/gradientMap.comp</file>
+        <file>shaders/paint/warp.comp</file>
+        <file>shaders/paint/transform.comp</file>
+        <file>shaders/paint/freeTransform.comp</file>
+        <file>shaders/paint/hueSatLight.comp</file>
+        <file>shaders/paint/brightnessContrast.comp</file>
+        <file>shaders/paint/colorBalance.comp</file>
+        <file>shaders/paint/toneCurve.comp</file>
+
+        <file>shaders/fill/wall.comp</file>
+        <file>shaders/fill/jfaInitInner.comp</file>
+        <file>shaders/fill/jfaInitOuter.comp</file>
+        <file>shaders/fill/jfa.comp</file>
+        <file>shaders/fill/jfaFinalize.comp</file>
+
+        <file>shaders/render/composite.comp</file>
+        <file>shaders/render/belowComposite.comp</file>
+        <file>shaders/render/chromaticAberrationLayer.comp</file>
+        <file>shaders/render/gaussianBlurLayer.comp</file>
+        <file>shaders/render/motionBlurLayer.comp</file>
+        <file>shaders/render/lensBlurLayer.comp</file>
+        <file>shaders/render/mosaicReduceLayer.comp</file>
+        <file>shaders/render/mosaicLayer.comp</file>
+        <file>shaders/render/noiseLayer.comp</file>
+        <file>shaders/render/render.vert</file>
+        <file>shaders/render/render.frag</file>
+        
+        <file>texts/initial_layout.txt</file>
+        <file>texts/version.txt</file>
+
+        <file>icons/app/app_icon.png</file>
+
+        <file>icons/cursor/dropper.png</file>
+        <file>icons/cursor/fill.png</file>
+        <file>icons/cursor/lasso.png</file>
+        <file>icons/cursor/move.png</file>
+        <file>icons/cursor/rotate.png</file>
+        <file>icons/cursor/text.png</file>
+
+        <file>icons/tool/airBrush.png</file>
+        <file>icons/tool/blur.png</file>
+        <file>icons/tool/colorAdjust.png</file>
+        <file>icons/tool/dropper.png</file>
+        <file>icons/tool/eraser.png</file>
+        <file>icons/tool/fill.png</file>
+        <file>icons/tool/lasso.png</file>
+        <file>icons/tool/move.png</file>
+        <file>icons/tool/quill.png</file>
+        <file>icons/tool/rotate.png</file>
+        <file>icons/tool/scale.png</file>
+        <file>icons/tool/text.png</file>
+        <file>icons/tool/text_preview.png</file>
+        <file>icons/tool/warp.png</file>
+
+        <file>icons/common/add_above.png</file>
+        <file>icons/common/add_right.png</file>
+        <file>icons/common/add_folder.png</file>
+        <file>icons/common/check.png</file>
+        <file>icons/common/copy.png</file>
+        <file>icons/common/copy_folder.png</file>
+        <file>icons/common/down.png</file>
+        <file>icons/common/flip.png</file>
+        <file>icons/common/invisible.png</file>
+        <file>icons/common/merge_bottom.png</file>
+        <file>icons/common/merge_left.png</file>
+        <file>icons/common/merge.png</file>
+        <file>icons/common/new.png</file>
+        <file>icons/common/reset_canvas.png</file>
+        <file>icons/common/trash.png</file>
+        <file>icons/common/plus.png</file>
+        <file>icons/common/up.png</file>
+        <file>icons/common/down.png</file>
+        <file>icons/common/visible.png</file>
+
+        <file>textures/penTip/circle.png</file>
+        <file>textures/penTip/pencil.png</file>
+        <file>textures/penTip/charcoal.png</file>
+        <file>textures/penTip/chalk.png</file>
+        <file>textures/penTip/bristle.png</file>
+        <file>textures/penTip/flat.png</file>
+        <file>textures/penTip/square.png</file>
+        <file>textures/penTip/spray.png</file>
+        <file>textures/penTip/leaf.png</file>
+        <file>textures/penTip/star.png</file>
+
+        <file>textures/paper/drawing.png</file>
+        <file>textures/paper/watercolor.png</file>
+        <file>textures/paper/rough.png</file>
+        <file>textures/paper/washi.png</file>
+        <file>textures/paper/canvas.png</file>
+        <file>textures/paper/cloth.png</file>
+        <file>textures/paper/grain.png</file>
+
+        <file>style.qss</file>
+    </qresource>
+</RCC>

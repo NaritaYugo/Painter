@@ -1,0 +1,140 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// ゆがみ(リキファイ)ブラシ
+// ---------------------------------------------------------------------------
+// 「累積変位ベクトル場」方式。ドラッグのたびに前回の結果を再サンプリングするのでは
+// なく、ストローク開始時の画像(uSrc、ストローク中ずっと不変)からの変位を uDisp に
+// 溜め込み、表示のたびに uSrc を1回だけ引き直す。
+//
+// 素朴な実装(毎ステップ、前フレームの結果をバイリニアで引き直して上書きする)は、
+// 1ストロークで100回以上補間を重ねることになり、補間のたびに掛かるローパスが
+// 積み重なって線がどんどん眠くなる。何回ドラッグしても補間を1回に保つのがこの方式の肝。
+//
+// 変位場そのものは毎ステップ補間し直すが、こちらは滑らかに変化する場なので
+// 補間を重ねてもディテールが失われる類のものではない(画像と違って高周波成分が無い)。
+//
+// 変位の更新は「加算」ではなく「合成」で行う:
+//     D_new(x) = (x' - x) + D_old(x')      x' = ブラシで引き戻した位置
+// 加算にすると絵柄がブラシに付いて動かず、その場で伸びるだけになってしまう。
+// 合成にすることで、Photoshopのリキファイのように絵柄をどこまでも引きずっていける。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;      // ストローク開始時のレイヤー(不変)
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;      // ワープ結果(タイルへ書き戻す前段)
+layout(r8,    binding = 2) uniform readonly  image2D selMask;   // 選択範囲。未選択時は全域255
+layout(rg32f, binding = 3) uniform readonly  image2D uDispPrev; // このステップ開始時点の累積変位
+layout(rg32f, binding = 4) uniform writeonly image2D uDisp;     // 更新後の累積変位
+
+uniform vec2  uPosStart;
+uniform vec2  uPosEnd;
+uniform vec2  uDelta;     // このステップでのドラッグ移動量(キャンバスpx, uPosEnd-uPosStart)
+uniform float uRadius;    // ブラシ半径(px)
+uniform float uHardness;  // 縁のフォールオフ 0..1
+uniform float uStrength;  // 引きずりの強さ 0..1(1で移動量そのまま追従)
+uniform int   uRegionMinX;
+uniform int   uRegionMinY;
+uniform int   uRegionMaxX;
+uniform int   uRegionMaxY;
+uniform int   uWrapX;         // キャンバスの左右ループが有効か
+uniform int   uWrapY;         // キャンバスの上下ループが有効か
+
+// main()の冒頭で確定させる(以降のヘルパーが毎回引数で受け取らずに済むように)
+ivec2 gSize;
+bool  gWrapX;
+bool  gWrapY;
+
+vec4 loadSrc(ivec2 c)  { return imageLoad(uSrc,      resolveSampleCoord(c, gSize, gWrapX, gWrapY)); }
+vec2 loadDisp(ivec2 c) { return imageLoad(uDispPrev, resolveSampleCoord(c, gSize, gWrapX, gWrapY)).rg; }
+
+// 変位場のバイリニア補間。ここは画像ではなく滑らかなベクトル場なので、
+// 毎ステップ補間し直してもボケとして目に見えることはない。
+vec2 sampleDispBilinear(vec2 p) {
+    vec2  f    = fract(p - 0.5);
+    ivec2 base = ivec2(floor(p - 0.5));
+    vec2 d00 = loadDisp(base);
+    vec2 d10 = loadDisp(base + ivec2(1, 0));
+    vec2 d01 = loadDisp(base + ivec2(0, 1));
+    vec2 d11 = loadDisp(base + ivec2(1, 1));
+    return mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
+}
+
+// 画像の再サンプリングはCatmull-Rom(3次)で行う。バイリニアは1pxの線を半px
+// ずらすだけで2px幅・半分の濃度に潰してしまうが、Catmull-Romは負のローブを持つため
+// エッジのコントラストをほぼ保ったまま運べる(線画を引きずっても輪郭が残る)。
+// image2Dはハードウェアの線形フィルタを使えないので、いずれにせよ手で組む必要がある。
+vec4 sampleImage(vec2 p) {
+    vec2  f    = fract(p - 0.5);
+    ivec2 base = ivec2(floor(p - 0.5));
+
+    // Catmull-Rom基底(t=0でw1のみ1になるので、変位が整数のときは元の画素と一致する)
+    vec2 w0 = ((-f + 2.0) * f - 1.0) * f * 0.5;
+    vec2 w1 = ((3.0 * f - 5.0) * f * f + 2.0) * 0.5;
+    vec2 w2 = ((-3.0 * f + 4.0) * f + 1.0) * f * 0.5;
+    vec2 w3 = (f - 1.0) * f * f * 0.5;
+
+    float wx[4] = float[4](w0.x, w1.x, w2.x, w3.x);
+    float wy[4] = float[4](w0.y, w1.y, w2.y, w3.y);
+
+    vec4 acc = vec4(0.0);
+    for (int j = 0; j < 4; j++) {
+        vec4 row = vec4(0.0);
+        for (int i = 0; i < 4; i++)
+            row += loadSrc(base + ivec2(i - 1, j - 1)) * wx[i];
+        acc += row * wy[j];
+    }
+
+    // 3次補間はエッジ付近で[0,1]をはみ出す(オーバーシュート)。pre-multiplied alphaの
+    // 不変条件 rgb <= a を壊すと合成時に縁が光るので、ここで畳んでおく。
+    acc.a   = clamp(acc.a, 0.0, 1.0);
+    acc.rgb = clamp(acc.rgb, vec3(0.0), vec3(acc.a));
+    return acc;
+}
+
+void main() {
+    // cは「生の」キャンバス座標(ラップ有効な軸ではディスパッチ範囲がキャンバス範囲外
+    // まで広がるため、負値やsz以上の値も取り得る)。ブラシの形状(距離判定)は
+    // この生座標のまま計算し、読み書き先だけを別途ラップする(stroke.compと同じ考え方)。
+    ivec2 regionMin = ivec2(uRegionMinX, uRegionMinY);
+    ivec2 c = regionMin + ivec2(gl_GlobalInvocationID.xy);
+    if (c.x > uRegionMaxX || c.y > uRegionMaxY) return;
+
+    gSize  = imageSize(uSrc);
+    gWrapX = uWrapX != 0;
+    gWrapY = uWrapY != 0;
+
+    if (!gWrapX && (c.x < 0 || c.x >= gSize.x)) return;
+    if (!gWrapY && (c.y < 0 || c.y >= gSize.y)) return;
+
+    ivec2 wc = c;
+    if (gWrapX) wc.x = ((c.x % gSize.x) + gSize.x) % gSize.x;
+    if (gWrapY) wc.y = ((c.y % gSize.y) + gSize.y) % gSize.y;
+
+    vec2 p = vec2(c) + vec2(0.5);
+    // キャンバスがタイル1枚分以下しかない等、ディスパッチ範囲を反対側へ拡張
+    // できない(=cが常に[0,sz)に収まる)場合でも正しく周回した距離が
+    // 得られるよう、ラップ候補も含めた最短距離を使う。
+    float d = distToSegmentWrapped(p, uPosStart, uPosEnd, vec2(gSize), gWrapX, gWrapY);
+
+    // ブラシの外側は変位が変わらない。ただしディスパッチ範囲は書き戻すタイル全体に
+    // 整列しているため、変位を持ち越したうえで画像は引き直しておく必要がある。
+    vec2 disp = imageLoad(uDispPrev, wc).rg;
+
+    if (d <= uRadius) {
+        float falloff = 1.0 - smoothstep(uRadius * uHardness, uRadius, d);
+        float sel     = imageLoad(selMask, wc).r;
+        float amt     = clamp(falloff * uStrength * sel, 0.0, 1.0);
+
+        // ドラッグ方向と逆向きに引き戻した位置の変位を引き継ぐ(=変位場の合成)。
+        // 「その位置にあった絵柄がドラッグ方向へ運ばれて今ここに来た」という関係になる。
+        vec2 back = p - uDelta * amt;
+        disp = (back - p) + sampleDispBilinear(back);
+    }
+
+    imageStore(uDisp, wc, vec4(disp, 0.0, 0.0));
+
+    // 変位ゼロの画素は補間を通さず素通しする(丸め誤差すら乗せない)。
+    if (dot(disp, disp) < 1e-12) imageStore(uDst, wc, imageLoad(uSrc, wc));
+    else                          imageStore(uDst, wc, sampleImage(p + disp));
+}

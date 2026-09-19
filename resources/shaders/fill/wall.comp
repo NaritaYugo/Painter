@@ -1,0 +1,22 @@
+#version 430 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// アクティブレイヤー (読み取り専用)
+layout(rgba8, binding = 1) uniform readonly image2D layerTex;
+
+// 出力: 壁=1, 空き=0 の R8 テクスチャ
+layout(r8, binding = 3) uniform writeonly image2D wallTex;
+
+uniform float uWallThreshold;
+uniform vec4 uStartColor;
+
+void main() {
+    ivec2 coord   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize = imageSize(layerTex);
+    if (coord.x >= texSize.x || coord.y >= texSize.y) return;
+
+    vec4  col  = imageLoad(layerTex, coord);
+    float wall = (length(col - uStartColor) >= uWallThreshold) ? 1.0 : 0.0;
+    imageStore(wallTex, coord, vec4(wall, 0.0, 0.0, 0.0));
+}

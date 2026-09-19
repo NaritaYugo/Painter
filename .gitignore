@@ -1,0 +1,13 @@
+/build/
+*.obj
+*.exe
+*.out
+
+/vcpkg_installed/
+
+/.vscode/
+/.claude/
+/CMakeUserPresets.json
+
+/.vs/
+/.idea/

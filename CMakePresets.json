@@ -1,0 +1,43 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows-static-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/static-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "windows-static-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/static-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "windows-static-debug-pro",
+      "displayName": "Windows static Debug (Pro)",
+      "inherits": "windows-static-debug",
+      "binaryDir": "${sourceDir}/build/static-debug-pro",
+      "cacheVariables": {
+        "TIEPOLO_PRO_BUILD": "ON"
+      }
+    },
+    {
+      "name": "windows-static-release-pro",
+      "displayName": "Windows static Release (Pro)",
+      "inherits": "windows-static-release",
+      "binaryDir": "${sourceDir}/build/static-release-pro",
+      "cacheVariables": {
+        "TIEPOLO_PRO_BUILD": "ON"
+      }
+    }
+  ]
+}

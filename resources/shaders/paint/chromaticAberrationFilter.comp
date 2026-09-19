@@ -1,0 +1,121 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// 色収差フィルター (Pro限定機能、フィルターメニュー用、即時適用)
+// ---------------------------------------------------------------------------
+// 元の色srcに対して、赤(1,0,0)・緑(0,1,0)・青(0,0,1)の単色「不透明」レイヤーを
+// それぞれ少しずつ違う位置からサンプリングしたsrcへ「乗算」ブレンドで重ね、
+// srcR, srcG, srcBを作る。乗算ブレンドの一般式(Porter-Duffのalpha合成にブレンド
+// モードを組み込んだもの)に従うと、乗算する側(この場合は赤/緑/青の単色レイヤー)が
+// 不透明であれば、結果は常に不透明になり、下(src)が透明な位置では乗算後もその
+// 単色(赤/緑/青)がそのまま見える(乗算する対象が無いので変化しようがない)。
+// そのため、srcが黒と透明色しか持たないレイヤーであっても、透明部分をサンプリング
+// した側の色がそのまま残り、正しく色がズレて見える。
+//   srcR = mix(赤, srcのstraight色*赤, srcのアルファ)   ※常にalpha=1
+//   srcG = mix(緑, srcのstraight色*緑, srcのアルファ)   ※常にalpha=1
+//   srcB = mix(青, srcのstraight色*青, srcのアルファ)   ※常にalpha=1
+// この3つ(常に不透明)を「スクリーン」合成で重ねる。3つとも不透明なので通常の
+// screen(a,b)=a+b-ab をそのまま使えばよい(アルファの積み上げを考える必要がない)。
+//
+// ずらす向きは2種類:
+//   uMode == 0 (平行): uAngleRad(ラジアン)の方向に固定(R:+方向, B:-方向、Gは中心のまま)。
+//   uMode == 1 (円形): 見た目として「拡大方向」(中心から遠ざかるように広がる)にする。
+//                      これを実現するには、出力ピクセルcのR/B値を「cより中心に近い点」
+//                      からサンプリングする必要がある(サンプル位置を外側にずらすと、
+//                      逆に絵が中心へ縮んで見えてしまう。ピクセル値の移動方向は
+//                      サンプリング方向と逆になるため)。ただし中心付近では、ずらす
+//                      距離が中心までの距離を超えると反対側に回り込んで絵が
+//                      吸い込まれるような不自然な見た目になるため、ずらす距離を
+//                      「中心までの距離」で頭打ちにする(中心ちょうどでサンプルが
+//                      止まり、飛び越えない)。
+//                      R:uDistancePx分, B:その半分(どちらも中心方向のみ、頭打ちあり)、
+//                      Gは中心のまま(平行モードは中心という概念が無くこの問題が
+//                      起きないため、従来通りR:+方向/B:-方向のままでよい)。
+// 結果は常に不透明になるため、選択範囲を指定してから適用すると、その範囲だけに
+// 効果を限定できる(未選択時は全域に適用され、レイヤー全体が塗りつぶされる)。
+// selMaskで元画像とブレンドしてuDstへ書き出すのは他のフィルター(mosaicFilter.comp等)
+// と同じ。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+
+uniform int   uMode;          // 0=平行, 1=円形
+uniform float uAngleRad;      // 平行モード時のずらす向き(ラジアン)
+uniform vec2  uCenterPx;      // 円形モード時の中心(レイヤーローカルpx座標)
+uniform float uDistancePx;    // ずらす距離(px)
+uniform ivec2 uSelMaskOffset; // selMask(キャンバス座標)に対する、このレイヤー原点のオフセット
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 origC = imageLoad(uSrc, c);
+
+    vec2 dir;
+    float len = 0.0;
+    if (uMode == 0) {
+        dir = vec2(cos(uAngleRad), sin(uAngleRad));
+    } else {
+        vec2 rel = vec2(c) - uCenterPx;
+        len = length(rel);
+        dir = (len > 0.0001) ? rel / len : vec2(0.0);
+    }
+
+    // サンプル位置のはみ出しは「テクスチャ範囲」ではなく「キャンバス矩形」で抑える。
+    // uSrcはレイヤーのタイル境界に合わせたサイズなので、テクスチャの右端・下端には
+    // キャンバス外の完全透明なパディングが最大255px残っている。テクスチャ範囲で
+    // クランプするとクランプ先がまさにそのパディングになり、透明を拾ってしまう。
+    // このシェーダーは透明を拾うと原色(赤/緑/青)がそのまま残る仕様なので、R/G/Bの
+    // 3つが揃って透明を拾うとスクリーン合成で真っ白になる ―― これがキャンバスの縁が
+    // 白くなる原因だった。キャンバス矩形でクランプすれば必ず実在する画素に寄るため、
+    // 縁でもわずかに色ズレが詰まるだけで白飛びしない。
+    // (R/G/Bの3点で1画素を作る以上「このサンプルは無し」にはできないので、ぼかし系の
+    //  ような有効サンプル正規化ではなくクランプで対処する)
+    const ivec2 canvasSize = imageSize(selMask); // 選択マスクは常にキャンバスサイズ
+
+    ivec2 rCoord, gCoord, bCoord;
+    if (uMode == 1) {
+        // 円形: サンプル位置を中心方向へずらす(=見た目は拡大方向に広がる)。
+        // ずらす距離はlenで頭打ちにし、中心を飛び越えないようにする。
+        float dR = min(uDistancePx, len);
+        float dB = min(uDistancePx * 0.5, len);
+        rCoord = clampCanvasSampleCoord(ivec2(round(vec2(c) - dir * dR)), uSelMaskOffset, canvasSize, sz);
+        gCoord = c;
+        bCoord = clampCanvasSampleCoord(ivec2(round(vec2(c) - dir * dB)), uSelMaskOffset, canvasSize, sz);
+    } else {
+        vec2 offset = dir * uDistancePx;
+        rCoord = clampCanvasSampleCoord(ivec2(round(vec2(c) + offset)), uSelMaskOffset, canvasSize, sz);
+        gCoord = c;
+        bCoord = clampCanvasSampleCoord(ivec2(round(vec2(c) - offset)), uSelMaskOffset, canvasSize, sz);
+    }
+    vec4 sR = imageLoad(uSrc, rCoord);
+    vec4 sG = imageLoad(uSrc, gCoord);
+    vec4 sB = imageLoad(uSrc, bCoord);
+
+    float rStraight = (sR.a > 0.0001) ? sR.r / sR.a : 0.0;
+    float gStraight = (sG.a > 0.0001) ? sG.g / sG.a : 0.0;
+    float bStraight = (sB.a > 0.0001) ? sB.b / sB.a : 0.0;
+
+    // 赤/緑/青の単色不透明レイヤーをsrcへ乗算(srcが透明ならそのまま単色が残る)
+    vec3 srcR = mix(vec3(1.0, 0.0, 0.0), vec3(rStraight, 0.0, 0.0), sR.a);
+    vec3 srcG = mix(vec3(0.0, 1.0, 0.0), vec3(0.0, gStraight, 0.0), sG.a);
+    vec3 srcB = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, bStraight), sB.a);
+
+    // 3つとも常に不透明なので、通常のscreen(a,b)=a+b-abをそのまま重ねればよい
+    vec3 screened = srcR;
+    screened = screened + srcG - screened * srcG;
+    screened = screened + srcB - screened * srcB;
+    vec4 shifted = vec4(screened, 1.0);
+
+    ivec2 selCoord = c + uSelMaskOffset;
+    ivec2 selSz = imageSize(selMask);
+    float sel = 0.0;
+    if (selCoord.x >= 0 && selCoord.y >= 0 && selCoord.x < selSz.x && selCoord.y < selSz.y)
+        sel = imageLoad(selMask, selCoord).r;
+
+    imageStore(uDst, c, mix(origC, shifted, sel));
+}

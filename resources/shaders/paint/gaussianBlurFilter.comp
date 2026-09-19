@@ -1,0 +1,81 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// ガウスぼかしフィルター(フィルターメニュー用、ブラシ操作ではなく即時適用)
+// ---------------------------------------------------------------------------
+// 2次元のガウス関数は G(x,y) = G(x) * G(y) と分離できるので、(2r+1)^2 回の
+// 2D畳み込みではなく「横方向に1D → 縦方向に1D」の2パス、計 2*(2r+1) 回で
+// 数学的に同じ結果が得られる。呼び出し側(GaussianBlurTool::updatePreview)が
+// uDir を変えて2回ディスパッチする。
+//
+// 分離していなかった頃は 2701x3624 のキャンバスで r=10 に 434ms、r=20 に 1657ms
+// かかっており(半径上限は64なのでさらに10倍)、スライダーを動かすたびに
+// 目に見えて固まっていた。分離すると r=20 で 87ms と19倍速くなる。
+//
+// パスの構成:
+//   1回目 uFinalPass=0: uSrc(元画像) -> uDst(中間バッファ)を横方向にぼかす
+//   2回目 uFinalPass=1: uSrc(中間バッファ) -> uDst(プレビュー結果)を縦方向にぼかし、
+//                       最後に uOrig(元画像)と selMask でブレンドする
+// 中間バッファは fullLayerTex とも transformSrcTex とも別の1枚
+// (ToolContext::ensureFilterScratch。詳細は GLWidget.h の filterScratchTex_ 参照)。
+//
+// レイヤーは pre-multiplied alpha なので、RGBAをそのまま重み付き平均すればよい。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+layout(rgba8, binding = 3) uniform readonly  image2D uOrig;   // 元画像(uFinalPass!=0のときのみ読む)
+
+uniform int   uKernelRadius;   // ぼかしサンプル半径(px)
+uniform float uSigma;          // ガウス分布の標準偏差
+uniform ivec2 uDir;            // (1,0)=横パス / (0,1)=縦パス
+uniform int   uFinalPass;      // 0=中間結果をそのまま書く / 1=元画像とselMaskでブレンドして仕上げる
+uniform ivec2 uSelMaskOffset;  // selMask(キャンバス座標)に対する、このレイヤー原点のオフセット
+uniform int   uWrapX;          // キャンバスの左右ループが有効か
+uniform int   uWrapY;          // キャンバスの上下ループが有効か
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 self = imageLoad(uSrc, c);
+
+    // サンプリング範囲はテクスチャ全体ではなくキャンバス矩形に限定し、範囲外は
+    // 加算にも重みの分母(wsum)にも数えない(common.glsl の resolveCanvasSampleCoord
+    // のコメント参照。テクスチャ右端・下端にあるキャンバス外の透明パディングを
+    // 巻き込むと、キャンバスの縁付近だけアルファが落ちて白っぽくなるため)。
+    const ivec2 canvasSize = imageSize(selMask); // 選択マスクは常にキャンバスサイズ
+
+    vec4  sum  = vec4(0.0);
+    float wsum = 0.0;
+    float twoSigmaSq = 2.0 * uSigma * uSigma;
+    for (int d = -uKernelRadius; d <= uKernelRadius; ++d) {
+        ivec2 s;
+        if (!resolveCanvasSampleCoord(c + uDir * d, uSelMaskOffset, canvasSize, sz,
+                                      uWrapX != 0, uWrapY != 0, s))
+            continue;
+        float w = exp(-float(d*d) / twoSigmaSq);
+        sum  += imageLoad(uSrc, s) * w;
+        wsum += w;
+    }
+    // キャンバス外の画素は有効サンプルが1つも無い(自分自身も範囲外)。その場合は
+    // 読んだ値をそのまま通す。仕上げパスでは下の mix が selMask=0 で元画像へ
+    // 戻すので、いずれにせよキャンバス外は元の内容が保たれる。
+    vec4 blurred = (wsum > 0.0) ? sum / wsum : self;
+
+    if (uFinalPass == 0) {
+        imageStore(uDst, c, blurred);
+        return;
+    }
+
+    ivec2 selCoord = c + uSelMaskOffset;
+    ivec2 selSz = imageSize(selMask);
+    float sel = 0.0;
+    if (selCoord.x >= 0 && selCoord.y >= 0 && selCoord.x < selSz.x && selCoord.y < selSz.y)
+        sel = imageLoad(selMask, selCoord).r;
+
+    imageStore(uDst, c, mix(imageLoad(uOrig, c), blurred, sel));
+}

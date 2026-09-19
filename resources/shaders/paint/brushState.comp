@@ -1,0 +1,79 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ===========================================================================
+// brushState.comp  ―  筆に乗っている絵の具を、スタンプ列に沿って更新する
+// ---------------------------------------------------------------------------
+// 下地混色は「筆が進みながらキャンバスの色を拾い、乗っている絵の具が変化する」
+// 動作なので、本質的にスタンプ列に沿った“逐次”計算になる。一方 stroke.comp は
+// 画素並列なので、そこでは扱えない。
+//
+// ただし筆に乗っている絵の具は(画素ごとではなく)スタンプごとに1色なので、
+// 必要なのは「スタンプの中心でキャンバスを1点読み、絵の具を1色更新する」だけ。
+// そのため1スレッドで直列に回す小さなパスで足りる(1バッチ数十回のテクスチャ読み)。
+// GPU→CPUの読み戻しを挟まずに済むのが要点。
+//
+// 出力はスタンプSSBOの3本目のvec4(=そのスタンプの色)で、続けて走る stroke.comp が
+// それを読んで画素へ塗る。
+//
+// 絵の具量(尽きるとかすれる)はここではなくCPU側で掛けている。消費量は
+// 「ストローク開始からの経路長」だけで決まる純粋な関数で、逐次計算が要らないため
+// (PenEraserTool::dispatchStampBatch 参照)。
+// ===========================================================================
+
+layout(local_size_x = 1, local_size_y = 1) in;
+
+// stroke.comp と同じスタンプSSBO。ここでは色([3i+2].rgb)と、
+// 「拾った色だけで塗る」ときの濃度([3i+0].w)を書き込む。
+layout(std430, binding = 2) buffer StampBuf { vec4 uStampData[]; };
+// 筆の状態。rgb = 乗っている絵の具の色、a = 筆の濡れ具合(どれだけ拾ったか)。
+// ストロークをまたいで持ち越さないよう、ストローク開始時と引き直し前にCPU側が
+// 初期化する(aは「拾った色だけで塗る」がオフなら1.0=最初から濡れている扱い)。
+layout(std430, binding = 3) buffer BrushPaintBuf { vec4 uBrushPaint; };
+
+// 拾う先。アクティブレイヤーの内容(ストローク開始時にfullLayerTexへ展開したもの)。
+layout(rgba8,   binding = 0) uniform readonly image2D uUnderTex;
+// ここまでのストローク(まだレイヤーへ焼き込まれていない分)。
+layout(r8,      binding = 1) uniform readonly image2D uStrokeMaskTex;
+layout(rgba16f, binding = 2) uniform readonly image2D uStrokeColorTex;
+
+uniform int   uStampCount;
+uniform float uMixRate;   // 下地混色(0で拾わない=常に基準色)
+uniform float uOpacity;   // ストロークの不透明度(マスク値→実アルファの換算に使う)
+uniform ivec2 uCanvasSize;
+
+void main() {
+    vec3  paint = uBrushPaint.rgb;
+    // 筆の濡れ具合。「拾った色だけで塗る」がオフなら1.0で始まり、下のmaxでも
+    // 1.0のままなので、スタンプの濃度は一切変わらない(=従来どおり)。
+    float load  = uBrushPaint.a;
+
+    for (int i = 0; i < uStampCount; i++) {
+        ivec2 p = ivec2(floor(uStampData[3 * i].xy));
+        p = clamp(p, ivec2(0), uCanvasSize - ivec2(1));
+
+        // 下地 = レイヤーの画素 + ここまでのストローク(まだ焼き込まれていない)。
+        // ストロークを含めないと、いま自分で置いた色を拾えず「塗った先から
+        // 元の色に戻る」不自然な混ざり方になる。
+        vec4  layerC  = imageLoad(uUnderTex, p);
+        float strokeA = imageLoad(uStrokeMaskTex, p).r * uOpacity;
+        vec3  strokeC = imageLoad(uStrokeColorTex, p).rgb * uOpacity;
+        vec4  under   = normalBlend(layerC, vec4(strokeC, strokeA));
+
+        // 何も無い所(透明)からは拾わない。拾ってしまうと絵の具が黒へ引っ張られる。
+        // そのため寄せる強さに下地の不透明度を掛ける。
+        if (under.a > 0.0) {
+            vec3 pick = under.rgb / under.a;   // 事前乗算を戻した素の色
+            paint = mix(paint, pick, uMixRate * under.a);
+            // 拾ったぶんだけ筆が濡れる。「拾った色だけで塗る」のときはこれが
+            // そのまま置ける量になるので、何も無い所から描き始めても何も付かない。
+            load  = max(load, uMixRate * under.a);
+        }
+
+        uStampData[3 * i + 2].rgb = paint;
+        uStampData[3 * i + 0].w  *= load;
+    }
+
+    uBrushPaint.rgb = paint;
+    uBrushPaint.a   = load;
+}

@@ -1,0 +1,15 @@
+#version 430 core
+//COMMON_INCLUDE
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(r8, binding = 0) uniform image2D maskTex;
+
+// 部分クリア用のディスパッチ起点(既定(0,0)。エアブラシのスタンプ単位クリアが使う)。
+uniform ivec2 uDispatchOrigin;
+
+void main() {
+    ivec2 texCoord = uDispatchOrigin + ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize  = imageSize(maskTex);
+    if (texCoord.x < 0 || texCoord.y < 0 || texCoord.x >= texSize.x || texCoord.y >= texSize.y) return;
+    imageStore(maskTex, texCoord, vec4(0.0));
+}

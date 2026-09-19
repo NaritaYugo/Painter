@@ -1,0 +1,194 @@
+#version 430 core
+//COMMON_INCLUDE
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 2, rgba8) uniform image2D          outTex;       // タイル1枚分
+
+// タイル配列は GL_MAX_ARRAY_TEXTURE_LAYERS の上限を超えるため複数の「バンク」
+// (それぞれ sampler2DArray)へ分割されている。グローバルなスライス番号 si は
+// (bank = si / uSlicesPerBank, local = si % uSlicesPerBank) に分解して読む。
+// MAX_BANKS は C++ 側 CanvasDocument.h の MAX_TILE_BANKS と一致させること。
+#define MAX_BANKS 8
+uniform sampler2DArray layerTexBanks[MAX_BANKS];
+uniform int uSlicesPerBank;
+// グローバルスライス si のタイルを uv 位置で読む。バンク配列を「ループ+定数index」で
+// 引くのは、フラグメント側でも安全(dynamically uniform)な定石。ミップ無しなので
+// textureLod(...,0.0)でよい。
+vec4 sampleTileArray(int si, vec2 uv) {
+    int bank = si / uSlicesPerBank;
+    float local = float(si - bank * uSlicesPerBank);
+    for (int b = 0; b < MAX_BANKS; b++)
+        if (b == bank) return textureLod(layerTexBanks[b], vec3(uv, local), 0.0);
+    return vec4(0.0);
+}
+
+// 調整レイヤーの色調整本体。kindは CanvasCompositor::updateLayerSSBOs が立てる
+// 1=明るさ・コントラスト, 2=色相・彩度・明度, 4=カラーバランス, 5=トーンカーブ,
+// 6=グラデーションマップ。5/6はLUTを1スライス(256x256、y=0行に256エントリ)だけ
+// 確保して baseSlice(uLayerBaseSlice[z])へ差し込んだもの(タイルを持たない調整
+// レイヤーではこのフィールドは本来常に-1なので、流用しても他の用途と衝突しない。
+// CanvasDocument.h Layer::lutSlice のコメント参照)。
+vec3 adjustLayerColor(int kind, vec3 rgb, vec3 p, int baseSlice) {
+    if (kind == 1) return adjustBrightnessContrast(rgb, p.x, p.y);
+    if (kind == 2) return adjustHSL(rgb, p.x, p.y, p.z);
+    if (kind == 4) return adjustColorBalance(rgb, p.x, p.y, p.z);
+    if (kind == 5) {
+        if (baseSlice < 0) return rgb;
+        return vec3(
+            sampleTileArray(baseSlice, vec2(clamp(rgb.r, 0.0, 1.0), 0.5 / 256.0)).r,
+            sampleTileArray(baseSlice, vec2(clamp(rgb.g, 0.0, 1.0), 0.5 / 256.0)).r,
+            sampleTileArray(baseSlice, vec2(clamp(rgb.b, 0.0, 1.0), 0.5 / 256.0)).r
+        );
+    }
+    if (kind == 6) {
+        if (baseSlice < 0) return rgb;
+        return sampleTileArray(baseSlice, vec2(clamp(blendLuma(rgb), 0.0, 1.0), 0.5 / 256.0)).rgb;
+    }
+    return rgb;
+}
+
+uniform int uLayerCount;
+uniform int uTargetStart; // 合成するレイヤーindex範囲(下から数えたz、両端含む)
+uniform int uTargetEnd;
+
+layout(std430, binding = 4) readonly buffer LayerOpacityBuf   { float uLayerOpacity[]; };
+layout(std430, binding = 5) readonly buffer LayerVisibleBuf   { int   uLayerVisible[]; };
+layout(std430, binding = 6) readonly buffer LayerBaseSliceBuf { int   uLayerBaseSlice[]; };
+// レイヤーマスクのベーススライス(-1なら無し)。マスクは常にキャンバス全体を覆う
+// 固定形(原点(0,0)、tilesX_ x tilesY_枚)なので、レイヤー本体と違い矩形判定は不要。
+layout(std430, binding = 1) readonly buffer LayerMaskBaseSliceBuf { int uLayerMaskBaseSlice[]; };
+// レイヤーを含むフォルダー(祖先、最大4階層ぶん)がそれぞれ持つマスクのベース
+// スライス(-1なら該当階層は無し/マスク無し)。フォルダー自体の表示/不透明度は
+// CPU側(CanvasCompositor::updateLayerSSBOs)でuLayerVisible/uLayerOpacityへ
+// 乗算済みの実効値を渡しているのでここでは扱わない。
+layout(std430, binding = 2) readonly buffer LayerAncestorMaskSlicesBuf { ivec4 uLayerAncestorMaskSlices[]; };
+layout(std430, binding = 7) readonly buffer LayerBlendModeBuf { int   uLayerBlendMode[]; };
+layout(std430, binding = 8) readonly buffer LayerClippingBuf  { int   uLayerClipping[]; };
+layout(std430, binding = 9)  readonly buffer LayerOriginTxBuf { int   uLayerOriginTx[]; };
+layout(std430, binding = 10) readonly buffer LayerOriginTyBuf { int   uLayerOriginTy[]; };
+layout(std430, binding = 11) readonly buffer LayerTilesXBuf   { int   uLayerTilesX[]; };
+layout(std430, binding = 12) readonly buffer LayerTilesYBuf   { int   uLayerTilesY[]; };
+layout(std430, binding = 13) readonly buffer LayerIsSolidColorBuf { int   uLayerIsSolidColor[]; };
+// 単色レイヤーの色(straight alpha, 0〜1)。binding 4〜15が埋まっているため、
+// テクスチャ/画像とは別名前空間で空いているbinding 0を使う。
+layout(std430, binding = 0)  readonly buffer LayerSolidColorBuf { vec4 uLayerSolidColor[]; };
+// 調整レイヤー関連。SSBOバインディング数の上限(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS、
+// 環境によっては16しかない)に収めるため、種類は1本のintに(0=調整レイヤーでない、
+// 1=明るさ・コントラスト、2=色相・彩度・明度)、パラメータはvec3配列1本にまとめてある。
+layout(std430, binding = 14) readonly buffer LayerAdjKindBuf   { int  uLayerAdjKind[]; };
+layout(std430, binding = 15) readonly buffer LayerAdjParamsBuf { vec3 uLayerAdjParams[]; };
+
+uniform ivec2 uTileOffset; // タイル左上のキャンバス座標
+uniform int uCanvasTilesX; // キャンバス全体のタイル数(横)。マスクのタイル参照に使う
+
+// C++側 CanvasDocument.h の TILE_SIZE (=256) と一致させること。
+// render.frag はuTileSizeをuniformで受け取るが、こちらは常に呼び出し側から
+// タイル境界に整列した uTileOffset しか渡ってこないため定数のままでよい。
+#define TILE_SIZE_PX 256
+
+// レイヤーzの、このキャンバスタイル位置に対応するスライスを返す(連番前提)。
+// レイヤー自身の矩形(originTx/Ty起点、tilesX[z]xtilesY[z])の外なら-1(=データなし)
+int tileSliceOf(int z) {
+    int canvasTx = uTileOffset.x / TILE_SIZE_PX;
+    int canvasTy = uTileOffset.y / TILE_SIZE_PX;
+    int localTx = canvasTx - uLayerOriginTx[z];
+    int localTy = canvasTy - uLayerOriginTy[z];
+    if (localTx < 0 || localTx >= uLayerTilesX[z] || localTy < 0 || localTy >= uLayerTilesY[z])
+        return -1;
+    return uLayerBaseSlice[z] + localTy * uLayerTilesX[z] + localTx;
+}
+
+// レイヤーzのマスク値(0〜1、マスクを持たなければ1=フルオープン)をこのタイル
+// 位置で読む。マスクは原点(0,0)固定・キャンバス全体サイズなので、キャンバス
+// タイル座標がそのままマスクローカル座標になる(原点補正不要)。
+// 1つのマスクベーススライスをこのタイル位置で読む(共通処理。baseSlice<0なら1.0)。
+float sampleMaskSlice(int base, vec2 uv) {
+    if (base < 0) return 1.0;
+    int canvasTx = uTileOffset.x / TILE_SIZE_PX;
+    int canvasTy = uTileOffset.y / TILE_SIZE_PX;
+    int si = base + canvasTy * uCanvasTilesX + canvasTx;
+    return sampleTileArray(si, uv).r;
+}
+
+float maskAlphaOf(int z, vec2 uv) {
+    float m = sampleMaskSlice(uLayerMaskBaseSlice[z], uv);
+    // 祖先フォルダーのマスク(最大4階層)も乗算でカスケードする
+    ivec4 anc = uLayerAncestorMaskSlices[z];
+    m *= sampleMaskSlice(anc.x, uv);
+    m *= sampleMaskSlice(anc.y, uv);
+    m *= sampleMaskSlice(anc.z, uv);
+    m *= sampleMaskSlice(anc.w, uv);
+    return m;
+}
+
+void main() {
+    ivec2 localCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize    = imageSize(outTex); // TILE_SIZE x TILE_SIZE
+    if (localCoord.x >= texSize.x || localCoord.y >= texSize.y) return;
+
+    if (uTargetStart > uTargetEnd) {
+        imageStore(outTex, localCoord, vec4(0.0));
+        return;
+    }
+
+    vec2 uv = (vec2(localCoord) + 0.5) / vec2(texSize);
+
+    vec4 result   = vec4(0.0);
+    vec4 clipBase = vec4(0.0); // 直近の非クリッピングレイヤーの(不透明度適用後の)色
+
+    int startZ = max(0, uTargetStart);
+    int endZ   = min(uLayerCount - 1, uTargetEnd);
+
+    for (int z = startZ; z <= endZ; z++) {
+        // フィルターレイヤーはタイル単位のこの経路では扱えない(近傍参照なので
+        // タイルの外が見えないと計算できない)。読み飛ばすだけにしてある。
+        // フィルターの効果まで含めた結果が要る書き出し等は、キャンバス全面を扱う
+        // belowComposite.comp 側の連鎖(GLWidget::rebuildFilterChain)を通る。
+        if (uLayerAdjKind[z] == 3) continue;
+
+        if (uLayerVisible[z] == 0) {
+            // 非表示の非クリッピングレイヤーはクリップグループの区切りにもなる
+            if (uLayerClipping[z] == 0) clipBase = vec4(0.0);
+            continue;
+        }
+
+        // 調整レイヤーはタイルを持たず、自身は色を持たない。代わりにここまでの
+        // 合成結果(result)へ非破壊で色調整をかけてから、通常のブレンド/クリップ
+        // 処理をスキップして次のレイヤーへ進む(不透明度は効果の強さとして使う)。
+        if (uLayerAdjKind[z] != 0) {
+            vec3 rgb = safeUnpremul(result.rgb, result.a);
+            vec3 adjusted = adjustLayerColor(uLayerAdjKind[z], rgb, uLayerAdjParams[z], uLayerBaseSlice[z]);
+            float m = maskAlphaOf(z, uv);
+            result.rgb = mix(rgb, adjusted, uLayerOpacity[z] * m) * result.a;
+            continue;
+        }
+
+        // 単色レイヤーはタイルを持たず、選択された色で手続き的に合成する
+        vec4 c;
+        if (uLayerIsSolidColor[z] != 0) {
+            vec4 sc = uLayerSolidColor[z];
+            c = vec4(sc.rgb * sc.a, sc.a); // テクスチャ側と同じ事前乗算アルファ形式に揃える
+        } else {
+            int si = tileSliceOf(z);
+            c = (si < 0) ? vec4(0.0) : sampleTileArray(si, uv);
+        }
+        c.rgb *= uLayerOpacity[z];
+        c.a   *= uLayerOpacity[z];
+        // レイヤーマスク(マスクを持たなければmaskAlphaOfは1.0を返すので無害)
+        float maskA = maskAlphaOf(z, uv);
+        c.rgb *= maskA;
+        c.a   *= maskA;
+
+        if (uLayerClipping[z] != 0) {
+            // 直近の非クリッピングレイヤーのアルファ形状でマスクする
+            c.rgb *= clipBase.a;
+            c.a   *= clipBase.a;
+        } else {
+            clipBase = c;
+        }
+
+        result = applyBlend(result, c, uLayerBlendMode[z], vec2(uTileOffset) + vec2(localCoord));
+    }
+
+    imageStore(outTex, localCoord, result);
+}

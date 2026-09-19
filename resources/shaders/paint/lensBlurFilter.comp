@@ -1,0 +1,125 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// レンズぼかしフィルター (Pro限定、フィルターメニュー用、プレビュー→確定方式)
+// ---------------------------------------------------------------------------
+// 深度マップは使わず、レイヤー全体へ一様に「レンズの絞りの形」のぼけを与える。
+// 狙いは玉ボケ(明るい点光源が絞りの形の円/多角形に広がるアレ)を出すこと。
+//
+// ■ なぜ普通のぼかしでは玉ボケにならないか
+// ガウスぼかしは中心が重い釣鐘型の重みなので、明るい点は「中心が濃くて外へ滑らかに
+// 消える」ボヤけた染みになる。実際のレンズは絞り開口の中を光が「一様に」通るので、
+// 点光源は開口と同じ形の「輪郭のはっきりした平らな円板」に広がる。つまり
+// カーネルを一様な円板(または多角形)にすることが玉ボケの必要条件。
+//
+// ■ それだけでは足りない: ハイライトの非線形強調
+// 一様円板で畳み込んでも、8bitに収まった明るさのままでは「平均に埋もれて」
+// 玉が目立たない。実写では点光源の輝度が周囲より桁違いに大きいためはっきり出る。
+// そこで、平均を取る前に色をγ乗して明るい画素の寄与を持ち上げ、平均後に1/γ乗で
+// 戻す(uBokehGamma)。加えて、しきい値(uThreshold)より明るい画素だけ重みを
+// uHighlightBoost 倍する。この2段構えで、暗部は普通のぼけ・ハイライトだけが
+// くっきりした玉として浮かび上がる。
+//
+// ■ サンプリング: Vogel(黄金角)スパイラル
+// 半径Rの円板を全画素なめると O(R^2) で、R=48だと1画素あたり7000回超になり実用外。
+// 代わりに黄金角 137.508° 刻みのスパイラル上に uSamples 点を取る。この配置は
+// 円板をほぼ均等に埋め、格子状サンプリングのような縞や十字状のムラが出ない。
+// サンプル数を固定にできるので、半径を大きくしてもコストが増えない。
+//
+// ■ 絞りの形(多角形)
+// uBlades==0 は円。3以上なら正多角形。ある方向θでの多角形の境界半径は
+//   cos(pi/n) / cos( mod(θ, 2pi/n) - pi/n )   (外接円半径1のとき)
+// これをサンプル半径に掛けて円板を多角形へ変形する(サンプルを捨てないので
+// 点数が無駄にならない)。
+//
+// アルファは乗算済み(premultiplied)なのでそのまま加重平均してよい
+// (motionBlurFilter.comp の同じ注記を参照)。ただしγ補正は「色」に対して
+// 行いたいので、ストレート色へ割り戻してからγ乗し、最後に戻す。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+
+uniform float uRadiusPx;        // ぼけ半径(px)
+uniform int   uSamples;         // スパイラルのサンプル数
+uniform int   uBlades;          // 0=円, 3以上=正多角形の辺数
+uniform float uBladeRotRad;     // 多角形の回転(ラジアン)
+uniform float uBokehGamma;      // ハイライト強調のγ(1=無効)
+uniform float uThreshold;       // 玉ボケ対象にする明るさのしきい値(0..1)
+uniform float uHighlightBoost;  // しきい値超の画素に掛ける追加重み(0=無効)
+uniform ivec2 uSelMaskOffset;   // selMask(キャンバス座標)に対する、このレイヤー原点のオフセット
+
+const float PI          = 3.14159265359;
+const float GOLDEN_ANGLE = 2.39996323; // 137.508° をラジアンにしたもの
+
+// 正多角形の、方向thにおける境界半径(外接円半径1で正規化)。円のときは1。
+float apertureScale(float th) {
+    if (uBlades < 3) return 1.0;
+    float n     = float(uBlades);
+    float sector = 2.0 * PI / n;
+    float a = mod(th - uBladeRotRad, sector) - sector * 0.5;
+    return cos(PI / n) / max(cos(a), 1e-4);
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 origC = imageLoad(uSrc, c);
+
+    int   n = max(uSamples, 1);
+    float g = max(uBokehGamma, 1.0);
+    const ivec2 canvasSize = imageSize(selMask); // 選択マスクは常にキャンバスサイズ
+
+    vec3  accumRGB = vec3(0.0); // γ空間のストレート色 × アルファ × 重み
+    float accumA   = 0.0;       // アルファ × 重み
+    float accumW   = 0.0;       // 重み
+
+    for (int i = 0; i < n; i++) {
+        // Vogel スパイラル: 半径は sqrt で等面積分布にする(そうしないと中心に密集する)
+        float fi = float(i) + 0.5;
+        float rr = sqrt(fi / float(n));
+        float th = fi * GOLDEN_ANGLE;
+        vec2  offs = vec2(cos(th), sin(th)) * (rr * uRadiusPx * apertureScale(th));
+
+        // 有効なサンプル範囲は「テクスチャ全体」ではなく「キャンバス矩形」。
+        // キャンバス外(テクスチャ右端・下端に残る透明パディングを含む)のサンプルは
+        // 加算にも分母(accumW)にも一切数えない。数えてしまうと、縁に近いほど
+        // その割合が増えるぶんアルファが削られ、キャンバスの縁が透明へフェードして
+        // 下地が透け、白っぽく見えてしまう(common.glsl の
+        // resolveCanvasSampleCoord のコメント参照)。
+        ivec2 p;
+        // レンズぼかしはキャンバスのループ(ラップ)には対応していないので false,false。
+        if (!resolveCanvasSampleCoord(ivec2(round(vec2(c) + offs)), uSelMaskOffset,
+                                      canvasSize, sz, false, false, p))
+            continue;
+        vec4 s = imageLoad(uSrc, p);
+        vec3 straight = (s.a > 0.0001) ? s.rgb / s.a : vec3(0.0);
+
+        // しきい値を超える明るさの画素だけ、玉ボケとして重みを持ち上げる
+        float lum = dot(straight, vec3(0.2126, 0.7152, 0.0722));
+        float w   = 1.0 + uHighlightBoost * smoothstep(uThreshold, min(uThreshold + 0.25, 1.0), lum);
+
+        accumRGB += pow(straight, vec3(g)) * s.a * w;
+        accumA   += s.a * w;
+        accumW   += w;
+    }
+
+    vec4 blurred = vec4(0.0);
+    if (accumW > 0.0001 && accumA > 0.0001) {
+        vec3  avgStraight = pow(accumRGB / accumA, vec3(1.0 / g)); // γ空間から戻す
+        float a = accumA / accumW;
+        blurred = vec4(clamp(avgStraight, 0.0, 1.0) * a, a); // 乗算済みへ戻す
+    }
+
+    ivec2 selCoord = c + uSelMaskOffset;
+    ivec2 selSz = imageSize(selMask);
+    float sel = 0.0;
+    if (selCoord.x >= 0 && selCoord.y >= 0 && selCoord.x < selSz.x && selCoord.y < selSz.y)
+        sel = imageLoad(selMask, selCoord).r;
+
+    imageStore(uDst, c, mix(origC, blurred, sel));
+}

@@ -1,0 +1,69 @@
+#version 430 core
+//COMMON_INCLUDE
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// 変形前の内容のスナップショット(読み取り専用。FreeTransformTool::applyTransformが
+// 事前にfullLayerTex/selectionMaskTexからコピーしておく)
+layout(rgba8, binding = 0) uniform readonly  image2D srcLayerTex;
+layout(r8,    binding = 1) uniform readonly  image2D srcSelMaskTex;
+// 焼き込み先(fullLayerTex/selectionMaskTexそのもの)
+layout(rgba8, binding = 2) uniform writeonly image2D dstLayerTex;
+layout(r8,    binding = 3) uniform writeonly image2D dstSelMaskTex;
+
+// 現在の4頂点(キャンバスpx座標): 0=TL,1=TR,2=BR,3=BL
+uniform vec2 uP0;
+uniform vec2 uP1;
+uniform vec2 uP2;
+uniform vec2 uP3;
+uniform vec2 uC0;       // 変形開始時の中心(キャンバスpx)
+uniform vec2 uHalfSize; // 変形開始時のbbox半径
+uniform int  uHasSelection;
+// srcLayerTex/dstLayerTexの左上が位置するキャンバスpx座標(タイル境界。負値/キャンバス外もありうる)。
+// selMaskTexは常にキャンバスサイズ固定(選択範囲はキャンバス内にしか存在しない)。
+uniform ivec2 uTexOriginPx;
+
+void main() {
+    ivec2 dst = ivec2(gl_GlobalInvocationID.xy); // レイヤーテクスチャ内ローカル座標
+    ivec2 texSize = imageSize(dstLayerTex);
+    if (dst.x >= texSize.x || dst.y >= texSize.y) return;
+
+    ivec2 canvasIdx = dst + uTexOriginPx; // このピクセルの整数キャンバス座標
+
+    // 逆双一次補間で、現在位置canvasIdxに映るべき「変形前のキャンバス座標」を求める
+    vec2 uv           = invBilinear(vec2(canvasIdx) + 0.5, uP0, uP1, uP2, uP3);
+    vec2 srcCanvasPos = uC0 + vec2((uv.x * 2.0 - 1.0) * uHalfSize.x, (uv.y * 2.0 - 1.0) * uHalfSize.y);
+    ivec2 srcCanvasIdx = ivec2(floor(srcCanvasPos));
+    ivec2 srcPx        = srcCanvasIdx - uTexOriginPx; // レイヤーテクスチャ内ローカル座標
+
+    bool inBounds = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0
+                 && srcPx.x >= 0 && srcPx.y >= 0 && srcPx.x < texSize.x && srcPx.y < texSize.y;
+
+    ivec2 selTexSize = imageSize(dstSelMaskTex);
+    bool dstSelInCanvas = canvasIdx.x >= 0 && canvasIdx.y >= 0 && canvasIdx.x < selTexSize.x && canvasIdx.y < selTexSize.y;
+    bool srcSelInCanvas = srcCanvasIdx.x >= 0 && srcCanvasIdx.y >= 0 && srcCanvasIdx.x < selTexSize.x && srcCanvasIdx.y < selTexSize.y;
+
+    // dst自身の「変形前の位置」がもともと移動対象(選択範囲/レイヤー全体)だったなら、
+    // そこは持ち去られて空になるので穴を開ける
+    float ownSel = (uHasSelection == 0) ? 1.0 : (dstSelInCanvas ? imageLoad(srcSelMaskTex, canvasIdx).r : 0.0);
+    vec4  base   = ownSel > 0.0 ? vec4(0.0) : imageLoad(srcLayerTex, dst);
+
+    vec4  moved    = vec4(0.0);
+    float movedSel = 0.0;
+    if (inBounds) {
+        float srcSel = (uHasSelection == 0) ? 1.0 : (srcSelInCanvas ? imageLoad(srcSelMaskTex, srcCanvasIdx).r : 0.0);
+        if (srcSel > 0.0) {
+            moved    = imageLoad(srcLayerTex, srcPx);
+            movedSel = 1.0;
+        }
+    }
+
+    imageStore(dstLayerTex, dst, normalBlend(base, moved));
+
+    if (dstSelInCanvas) {
+        if (uHasSelection != 0)
+            imageStore(dstSelMaskTex, canvasIdx, vec4(movedSel, 0.0, 0.0, 1.0));
+        else
+            imageStore(dstSelMaskTex, canvasIdx, imageLoad(srcSelMaskTex, canvasIdx));
+    }
+}

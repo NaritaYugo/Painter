@@ -1,0 +1,39 @@
+#version 430 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(r8,    binding = 3) uniform readonly  image2D wallTex;
+layout(rg16f, binding = 4) uniform readonly  image2D outerJfaTex; // 外側JFA結果
+layout(rg16f, binding = 5) uniform readonly  image2D innerJfaTex; // 内側JFA結果
+layout(r32f,  binding = 6) uniform writeonly image2D sdfTex;       // 出力SDF
+
+void main() {
+    ivec2 coord   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize = imageSize(sdfTex);
+    if (coord.x >= texSize.x || coord.y >= texSize.y) return;
+
+    float wall = imageLoad(wallTex, coord).r;
+
+    // 外側距離: 非壁ピクセルから最寄り壁までの距離 (正)
+    vec2  outerSeed = imageLoad(outerJfaTex, coord).xy;
+    float outerDist = (outerSeed.x < 0.0)
+        ? 1e9
+        : length(vec2(coord) - outerSeed);
+
+    // 内側距離: 壁ピクセルから最寄り非壁までの距離 (負として使う)
+    vec2  innerSeed = imageLoad(innerJfaTex, coord).xy;
+    float innerDist = (innerSeed.x < 0.0)
+        ? 1e9
+        : length(vec2(coord) - innerSeed);
+
+    float sdf;
+    if (wall > 0.5) {
+        // 壁ピクセル: 内側なので負値
+        sdf = -innerDist;
+    } else {
+        // 非壁ピクセル: 外側なので正値
+        sdf = outerDist;
+    }
+
+    imageStore(sdfTex, coord, vec4(sdf, 0.0, 0.0, 0.0));
+}

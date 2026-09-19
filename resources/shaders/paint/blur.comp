@@ -1,0 +1,73 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// ぼかしブラシ
+// ---------------------------------------------------------------------------
+// uSrc(収集済みアクティブレイヤー)を読み取り、ブラシ範囲内のピクセルを
+// 近傍平均でぼかして uDst へ書き出す。読み書きを別テクスチャに分けることで
+// カーネル参照時の read-after-write ハザードを避ける。
+// レイヤーは pre-multiplied alpha なので、RGBAをそのまま平均すれば線形なぼかしになる。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc;    // 収集済みレイヤー
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;    // ぼかし作業テクスチャ
+layout(r8,    binding = 2) uniform readonly  image2D selMask; // 選択範囲。未選択時は全域255
+
+uniform vec2  uPosStart;
+uniform vec2  uPosEnd;
+uniform float uRadius;        // ブラシ半径(px)
+uniform float uHardness;      // 縁のフォールオフ 0..1
+uniform float uStrength;      // 元画像と混ぜる量 0..1
+uniform int   uKernelRadius;  // ぼかしサンプル半径(px)
+uniform int   uRegionMinX;    // 処理領域の左下(キャンバスpx)
+uniform int   uRegionMinY;
+uniform int   uRegionMaxX;    // 処理領域の右上(含む)
+uniform int   uRegionMaxY;
+uniform int   uWrapX;         // キャンバスの左右ループが有効か
+uniform int   uWrapY;         // キャンバスの上下ループが有効か
+
+void main() {
+    // cは「生の」キャンバス座標(ラップ有効な軸ではディスパッチ範囲がキャンバス範囲外
+    // まで広がるため、負値やsz以上の値も取り得る)。ブラシの形状(距離判定)は
+    // この生座標のまま計算し、読み書き先だけを別途ラップする(stroke.compと同じ考え方)。
+    ivec2 regionMin = ivec2(uRegionMinX, uRegionMinY);
+    ivec2 c = regionMin + ivec2(gl_GlobalInvocationID.xy);
+    if (c.x > uRegionMaxX || c.y > uRegionMaxY) return;
+    ivec2 sz = imageSize(uSrc);
+
+    // ラップが無効な軸は、従来通りキャンバス範囲外を弾く
+    if (uWrapX == 0 && (c.x < 0 || c.x >= sz.x)) return;
+    if (uWrapY == 0 && (c.y < 0 || c.y >= sz.y)) return;
+
+    // 読み書き先座標(ラップ有効な軸だけ周回させる)
+    ivec2 wc = c;
+    if (uWrapX != 0) wc.x = ((c.x % sz.x) + sz.x) % sz.x;
+    if (uWrapY != 0) wc.y = ((c.y % sz.y) + sz.y) % sz.y;
+
+    vec4 orig = imageLoad(uSrc, wc);
+
+    // ブラシ距離は生のcで計算(ラップ書き込み先wcを使うと形状が歪むため)。
+    // キャンバスがタイル1枚分以下しかない等、ディスパッチ範囲を反対側へ拡張
+    // できない(=cが常に[0,sz)に収まる)場合でも正しく周回した距離が
+    // 得られるよう、ラップ候補も含めた最短距離を使う。
+    float d = distToSegmentWrapped(vec2(c) + vec2(0.5), uPosStart, uPosEnd, vec2(sz), uWrapX != 0, uWrapY != 0);
+    if (d > uRadius) { imageStore(uDst, wc, orig); return; }
+
+    float falloff = 1.0 - smoothstep(uRadius * uHardness, uRadius, d);
+
+    vec4  sum  = vec4(0.0);
+    float wsum = 0.0;
+    for (int dy = -uKernelRadius; dy <= uKernelRadius; ++dy) {
+        for (int dx = -uKernelRadius; dx <= uKernelRadius; ++dx) {
+            ivec2 s = resolveSampleCoord(c + ivec2(dx, dy), sz, uWrapX != 0, uWrapY != 0);
+            sum  += imageLoad(uSrc, s);
+            wsum += 1.0;
+        }
+    }
+    vec4 blurred = (wsum > 0.0) ? sum / wsum : orig;
+
+    float sel = imageLoad(selMask, wc).r;
+    float amt = clamp(falloff * uStrength * sel, 0.0, 1.0);
+    imageStore(uDst, wc, mix(orig, blurred, amt));
+}

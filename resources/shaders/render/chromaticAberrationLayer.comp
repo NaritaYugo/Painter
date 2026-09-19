@@ -1,0 +1,127 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// 色収差フィルターレイヤー (Pro限定)
+// ---------------------------------------------------------------------------
+// 「これより下のレイヤーの合成結果」に色収差をかける、非破壊フィルターレイヤー用。
+// 入出力ともキャンバス全面(canvasW x canvasH)の事前乗算アルファRGBA8で、
+// GLWidget::rebuildFilterChain() が合成の途中結果に対して呼ぶ。
+//
+// ■ 破壊的フィルター版(paint/chromaticAberrationFilter.comp)との違い
+// あちらは「1枚のレイヤーへ焼き込む」用途で、赤/緑/青の不透明レイヤーを乗算→
+// スクリーン合成するため、結果が常に不透明になる。その仕様のままフィルター
+// レイヤーに使うと、下に何も無い透明な領域まで塗りつぶされてキャンバス全面が
+// 不透明になってしまう。
+// そこでこちらは素直に「R/G/Bをそれぞれ別の位置から拾い、アルファは3点の最大を
+// 採る」という定義にしてある。アルファが1の領域(=下に絵がある普通の場所)では
+// 両者は完全に一致するので、見た目の互換性は保たれる:
+//   sR.a=sG.a=sB.a=1 のとき
+//     破壊版:  srcR=(r,0,0), srcG=(0,g,0), srcB=(0,0,b) → screen → (r,g,b), a=1
+//     こちら:  a=1, straight=(r,g,b)                      → (r,g,b), a=1
+// アルファが欠けている縁では、最大を採ることで「にじむ方向へアルファも広がる」ため、
+// 絵の外側へ色が漏れ出す自然な色収差になる。
+//
+// 選択範囲は見ない。フィルターレイヤーの効果範囲はレイヤーマスクと不透明度で
+// 制御するもので、選択範囲は「今まさに選んでいる領域」という一時的な状態だからである
+// (調整レイヤーが選択範囲を見ないのと同じ)。
+// 不透明度とレイヤーマスク(自身のマスク×祖先フォルダーのマスク)は効果の強さとして
+// 効き、最後に元画像とのブレンド率になる ―― つまりマスクを黒く塗ったところは
+// 色収差がかからない。調整レイヤーと同じ扱い。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc; // ここまでの合成結果
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+
+uniform int   uMode;        // 0=平行, 1=円形
+uniform float uAngleRad;    // 平行モード時のずらす向き(ラジアン)
+uniform vec2  uCenterPx;    // 円形モード時の中心(キャンバスpx座標)
+uniform float uDistancePx;  // ずらす距離(px)
+
+// 効果の強さ(フィルターレイヤーの不透明度)とレイヤーマスク。
+// マスクの引き方は belowComposite.comp の sampleMaskSlice と同じ。
+uniform float uOpacity;
+uniform int   uMaskBase;          // このフィルターレイヤー自身のマスク(-1なら無し)
+uniform ivec4 uAncestorMaskBases; // 祖先フォルダー(最大4階層)のマスク(-1なら無し)
+uniform int   uTileSize;
+uniform int   uCanvasTilesX;
+
+#define MAX_BANKS 8
+uniform sampler2DArray layerTexBanks[MAX_BANKS];
+uniform int uSlicesPerBank;
+vec4 sampleTileArray(int si, vec2 uv) {
+    int bank = si / uSlicesPerBank;
+    float local = float(si - bank * uSlicesPerBank);
+    for (int b = 0; b < MAX_BANKS; b++)
+        if (b == bank) return textureLod(layerTexBanks[b], vec3(uv, local), 0.0);
+    return vec4(0.0);
+}
+
+float sampleMaskSlice(int base, ivec2 canvasPx) {
+    if (base < 0) return 1.0;
+    int tx = canvasPx.x / uTileSize;
+    int ty = canvasPx.y / uTileSize;
+    vec2 tileOrigin = vec2(tx * uTileSize, ty * uTileSize);
+    vec2 localUV = (vec2(canvasPx) + 0.5 - tileOrigin) / float(uTileSize);
+    return sampleTileArray(base + ty * uCanvasTilesX + tx, localUV).r;
+}
+
+float maskAlphaAt(ivec2 canvasPx) {
+    return sampleMaskSlice(uMaskBase, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.x, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.y, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.z, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.w, canvasPx);
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec2 dir;
+    float len = 0.0;
+    if (uMode == 0) {
+        dir = vec2(cos(uAngleRad), sin(uAngleRad));
+    } else {
+        vec2 rel = vec2(c) - uCenterPx;
+        len = length(rel);
+        dir = (len > 0.0001) ? rel / len : vec2(0.0);
+    }
+
+    // 破壊版と同じずらし方(円形は「拡大方向に広がって見える」ようサンプル位置を
+    // 中心側へずらし、ずらす距離を中心までの距離で頭打ちにする)。
+    ivec2 rCoord, gCoord, bCoord;
+    if (uMode == 1) {
+        float dR = min(uDistancePx, len);
+        float dB = min(uDistancePx * 0.5, len);
+        rCoord = ivec2(round(vec2(c) - dir * dR));
+        gCoord = c;
+        bCoord = ivec2(round(vec2(c) - dir * dB));
+    } else {
+        vec2 offset = dir * uDistancePx;
+        rCoord = ivec2(round(vec2(c) + offset));
+        gCoord = c;
+        bCoord = ivec2(round(vec2(c) - offset));
+    }
+    // 入出力はキャンバス全面ちょうどなので、単純に画像境界へクランプすればよい
+    // (破壊版のようなタイル境界ぶんの透明パディングは存在しない)。
+    rCoord = clamp(rCoord, ivec2(0), sz - ivec2(1));
+    bCoord = clamp(bCoord, ivec2(0), sz - ivec2(1));
+
+    vec4 sR = imageLoad(uSrc, rCoord);
+    vec4 sG = imageLoad(uSrc, gCoord);
+    vec4 sB = imageLoad(uSrc, bCoord);
+
+    // 事前乗算のまま単純にチャンネルを混ぜると、アルファの違う画素どうしで
+    // 明るさが狂う。ストレート色に戻してから混ぜ、最後に出力アルファを掛け直す。
+    float a = max(max(sR.a, sG.a), sB.a);
+    vec3 straight = vec3(safeUnpremul(sR.rgb, sR.a).r,
+                         safeUnpremul(sG.rgb, sG.a).g,
+                         safeUnpremul(sB.rgb, sB.a).b);
+    vec4 shifted = vec4(straight * a, a);
+
+    // 効果の強さ(不透明度×マスク)で元の合成結果へ混ぜる
+    float amount = clamp(uOpacity * maskAlphaAt(c), 0.0, 1.0);
+    imageStore(uDst, c, mix(sG, shifted, amount));
+}

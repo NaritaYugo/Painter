@@ -1,0 +1,580 @@
+/* ==========================================================================
+   全体・ウィジェットの基本設定
+   ========================================================================== */
+QWidget {
+    background-color: @bgBase@;
+    color: @text@;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 9pt;
+}
+
+/* ウィジェット（背景よりちょっと明るめ） */
+QFrame, QGroupBox {
+    background-color: @bgPanel@; /* 背景 @bgBase@ より少し明るく */
+    border: 1px solid @bgButton@;
+    border-radius: 6px;
+}
+
+QLabel {
+    background-color: transparent;
+    border: none;
+}
+
+/* ==========================================================================
+   ボタン（影なし・フラット）
+   ========================================================================== */
+QPushButton {
+    background-color: @bgButton@;
+    color: @text@;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-height: 18px;
+}
+
+QPushButton:hover {
+    background-color: @hoverBg@;
+}
+
+QPushButton:pressed {
+    background-color: @accent@;
+    color: @textBright@;
+}
+
+QPushButton:checked {
+    background-color: @accent@;
+    color: @textBright@;
+}
+
+QPushButton:disabled {
+    background-color: @bgDisabled@;
+    color: @textDisabled@;
+}
+
+/* ==========================================================================
+   フローティングパネル(DraggablePanel派生)の共通部品
+   ========================================================================== */
+/* キャンセルボタン(中立色)/確定ボタン(アクセント色)。パネル背景の半透明丸角矩形
+   自体はDraggablePanel::paintEvent()がTheme::overlayPanelBgで直接描画する
+   (QSSでは不透明度付きの角丸背景を塗れないため、そこだけはC++側で完結する)。 */
+QPushButton#panelCancelButton {
+    background-color: @bgButton@;
+    color: @text@;
+    border-radius: 4px;
+    padding: 6px 14px;
+}
+
+QPushButton#panelConfirmButton {
+    background-color: @accent@;
+    color: @textBright@;
+    border-radius: 4px;
+    padding: 6px 14px;
+}
+
+/* ToneCurvePanelの「選択中の点を削除」ボタン(通常ボタンより小さいpadding) */
+QPushButton#panelDeleteButton {
+    background-color: @bgButton@;
+    color: @text@;
+    border-radius: 4px;
+    padding: 4px 10px;
+}
+
+QPushButton#panelDeleteButton:disabled {
+    color: @scrollHandleHover@;
+}
+
+QLabel#panelTitle {
+    color: @panelText@;
+    font-weight: bold;
+}
+
+QLabel#panelLabel {
+    color: @panelText@;
+}
+
+QCheckBox#panelCheckbox {
+    color: @panelText@;
+}
+
+/* CustomShaderPanelのGLSLエディタ。QPlainTextEditはQTextEditを継承しないため
+   下の「QLineEdit, QTextEdit」ルールでは拾えず、専用セレクタが必要。 */
+QPlainTextEdit#codeEditor {
+    background-color: @codeEditorBg@;
+    color: @codeEditorText@;
+    border: 1px solid @codeEditorBorder@;
+    border-radius: 4px;
+}
+
+QLabel#panelHint {
+    color: @hintText@;
+    font-size: 11px;
+}
+
+QLabel#panelError {
+    color: @errorText@;
+    font-size: 11px;
+}
+
+/* ドックを重ねてタブ化したときにQtが生成する切り替え用タブバー。
+   DockTitleBar(自作のドックタイトルバー)と見た目を揃える。 */
+QTabBar#dockGroupTabBar {
+    background-color: @bgButton@;
+    border: none;
+}
+
+QTabBar#dockGroupTabBar::tab {
+    background-color: @bgButton@;
+    color: @panelText@;
+    padding: 2px 4px 2px 8px;
+    margin: 0;
+    border: none;
+}
+
+QTabBar#dockGroupTabBar::tab:selected {
+    background-color: @bgPanel@;
+}
+
+QTabBar#dockGroupTabBar::close-button {
+    subcontrol-position: right;
+}
+
+/* CanvasSizePanelの原点アンカー選択(3x3グリッド)ボタン */
+QPushButton#anchorButton {
+    background-color: @bgButton@;
+    border: 1px solid @textDisabled@;
+    border-radius: 3px;
+}
+
+QPushButton#anchorButton:checked {
+    background-color: @accent@;
+    border: 1px solid @accent@;
+}
+
+/* ==========================================================================
+   スライドバー
+   ========================================================================== */
+QSlider::groove:horizontal {
+    border: none;
+    height: 20px; /* 当たり判定となる実際の高さ */
+    /* 上下6pxを透明、中央4pxをグレーにするグラデーション */
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 transparent,
+        stop:0.374 transparent,
+        stop:0.375 @bgButton@,
+        stop:0.625 @bgButton@,
+        stop:0.626 transparent,
+        stop:1 transparent);
+    /* 全体の四隅に対する丸み付けになります */
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: @accent@;
+    border: none;
+    width: 12px;
+    height: 12px;
+    /* 16pxの溝に対して12pxのハンドルを中央配置するため、上下マージンを2pxに設定 */
+    margin: 4px 0;
+    border-radius: 6px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: @accentHoverLight@;
+}
+/* ==========================================================================
+   チェックボックス
+   ========================================================================== */
+QCheckBox {
+    spacing: 6px;
+    color: @text@;
+}
+
+/* チェックボックスの枠 */
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+
+    border: 1px solid @bgButton@;
+    border-radius: 3px;
+    background-color: @bgInput@;
+}
+
+/* ホバー */
+QCheckBox::indicator:hover {
+    border: 1px solid @accent@;
+    background-color: @bgDisabled@;
+}
+
+/* チェック状態 */
+QCheckBox::indicator:checked {
+    border: 1px solid @accent@;
+    background-color: @accent@;
+    image: url(:/icons/common/check.png);
+}
+
+/* チェック状態 + ホバー */
+QCheckBox::indicator:checked:hover {
+    background-color: @accentHoverLight2@;
+    border: 1px solid @accentHoverLight@;
+}
+
+/* 無効 */
+QCheckBox:disabled {
+    color: @textDisabled@;
+}
+
+QCheckBox::indicator:disabled {
+    border: 1px solid @bgBase@;
+    background-color: @bgDisabled@;
+}
+
+/* チェック済み + 無効 */
+QCheckBox::indicator:checked:disabled {
+    border: 1px solid @bgBase@;
+    background-color: @textDisabled@;
+}
+
+/* ==========================================================================
+   ラジオボタン
+   ========================================================================== */
+QRadioButton {
+    spacing: 6px; /* ラジオボタンとテキストの隙間 */
+    color: @text@;
+}
+
+/* ラジオボタンの丸い枠 */
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 8px; /* (width 14px + border 1px*2) / 2 = 8px で綺麗な円にする */
+    border: 1px solid @bgButton@;
+    background-color: @bgInput@; /* テキスト入力エリアとトーンを合わせる */
+}
+
+QRadioButton::indicator:hover {
+    border: 1px solid @accent@;
+    background-color: @bgDisabled@;
+}
+
+/* チェック時の状態（外部画像を使わず、放射状グラデーションで中央のドットを描画） */
+QRadioButton::indicator:checked {
+    border: 1px solid @accent@;
+    background-color: qradialgradient(
+        cx:0.5, cy:0.5, radius:0.4, fx:0.5, fy:0.5,
+        stop:0 @accent@, stop:0.6 @accent@, stop:0.7 transparent
+    );
+}
+
+/* 無効化時の状態 */
+QRadioButton:disabled {
+    color: @textDisabled@;
+}
+
+QRadioButton::indicator:disabled {
+    border: 1px solid @bgBase@;
+    background-color: @bgDisabled@;
+}
+
+QRadioButton::indicator:checked:disabled {
+    border: 1px solid @bgBase@;
+    background-color: qradialgradient(
+        cx:0.5, cy:0.5, radius:0.4, fx:0.5, fy:0.5,
+        stop:0 @textDisabled@, stop:0.6 @textDisabled@, stop:0.7 transparent
+    );
+}
+
+/* ==========================================================================
+   メニューバー ＆ ツールバー（一括設定）
+   ========================================================================== */
+/* 全体の背景色と枠線リセット */
+QMenuBar, QToolBar {
+    background-color: @bgBase@;
+    color: @text@;
+    border: none;
+}
+
+/* 各アイテム・ボタンの通常時 */
+QMenuBar::item, QToolBar QToolButton {
+    background-color: transparent; /* 背景を透過してバーに馴染ませる */
+    border: none;                  /* OS標準の影・立体感を完全に消す */
+    border-radius: 4px;
+    padding: 6px 12px;
+}
+
+/* ホバー時（マウスオーバー時）
+   ※ メニューは :selected、ツールボタンは :hover を使用します */
+QMenuBar::item:selected, QToolBar QToolButton:hover {
+    background-color: @hoverBg@;
+    border: none;
+}
+
+/* クリック時（どちらも :pressed で判定） */
+QMenuBar::item:pressed, QToolBar QToolButton:pressed {
+    background-color: @accent@;
+    color: @textBright@;
+}
+
+/* ツールボタンがチェック状態（トグルON）の時 */
+QToolBar QToolButton:checked {
+    background-color: @accent@;
+    color: @textBright@;
+}
+
+/* ==========================================================================
+   ドロップダウンメニュー本体（おまけ）
+   ========================================================================== */
+QMenu {
+    background-color: @bgPanel@;
+    color: @text@;
+    border: 1px solid @bgButton@;
+    border-radius: 4px;
+    padding: 4px 0px;
+}
+
+QMenu::item {
+    padding: 6px 24px;
+}
+
+QMenu::item:selected {
+    background-color: @accent@;
+    color: @textBright@;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: @bgButton@;
+    margin: 4px 0px;
+}
+
+/* ==========================================================================
+   ツールバー・ドックのハンドル（移動用グリップ）
+   ========================================================================== */
+/* QToolBarのグリップ部分（点線の代わりになるモダンなスリット） */
+QToolBar::handle:horizontal {
+    width: 12px;
+    /* 線形グラデーションを使って、薄い縦線を擬似的に描画 */
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @bgBase@,
+        stop:0.2 @bgBase@,
+        stop:0.3 @textDisabled@,
+        stop:0.4 @bgBase@,
+        stop:0.6 @bgBase@,
+        stop:0.7 @textDisabled@,
+        stop:0.8 @bgBase@,
+        stop:1 @bgBase@);
+    margin: 8px 0px;
+}
+
+QToolBar::handle:vertical {
+    height: 12px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bgBase@,
+        stop:0.2 @bgBase@,
+        stop:0.3 @textDisabled@,
+        stop:0.4 @bgBase@,
+        stop:0.6 @bgBase@,
+        stop:0.7 @textDisabled@,
+        stop:0.8 @bgBase@,
+        stop:1 @bgBase@);
+    margin: 0px 8px;
+}
+
+/* QMainWindowのセパレータ（QDockWidgetなどの境界線やリサイズハンドル） */
+QMainWindow::separator {
+    background: @bgBase@;
+    width: 4px;  /* 縦の境界線の太さ */
+    height: 4px; /* 横の境界線の太さ */
+}
+
+QMainWindow::separator:hover {
+    background: @textDisabled@; /* ホバー時に少し明るくして、掴めることをアピール */
+}
+
+/* ==========================================================================
+   スクロールバーの背景修正（網掛けの除去）
+   ========================================================================== */
+/* デフォルトの網掛けが表示される原因は、縦スクロールバーの「add-page」「sub-page」
+   （ハンドルの上下の余白部分）が指定されていないため、OS標準の描画が露出しているためです。
+*/
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: @bgBase@; /* ここを背景色で塗りつぶすことで網掛けが消えます */
+    border: none;
+}
+
+/* ==========================================================================
+   スピンボックス（QDoubleSpinBox / QSpinBox）
+   ========================================================================= */
+QDoubleSpinBox, QSpinBox {
+    background-color: @bgInput@;
+    border: 1px solid @bgButton@;
+    border-radius: 4px;
+    padding: 4px;
+    padding-right: 20px;
+    color: @text@;
+}
+
+QDoubleSpinBox::up-button, QSpinBox::up-button,
+QDoubleSpinBox::down-button, QSpinBox::down-button {
+    background: transparent; /* これでデフォルトのグレーの背景や影が消えます */
+    border: none;             /* デフォルトのボタンの枠線を消去 */
+    width: 16px;
+}
+
+/* 3. 上ボタンの位置調整 */
+QDoubleSpinBox::up-button, QSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    vertical-align: bottom;
+    right: 4px; /* 外枠の角丸(border-radius)と被らないように少し内側に */
+    top: 2px;
+}
+
+/* 4. 下ボタンの位置調整 */
+QDoubleSpinBox::down-button, QSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    vertical-align: top;
+    right: 4px;
+    bottom: 2px;
+}
+
+/* 上矢印のPNG画像指定 */
+QSpinBox::up-arrow {
+    image: url(:/icons/common/up.png); /* リソースパスまたは相対パス */
+    width: 8px;
+    height: 8px;
+}
+
+/* 下矢印のPNG画像指定 */
+QSpinBox::down-arrow {
+    image: url(:/icons/common/down.png);
+    width: 8px;
+    height: 8px;
+}
+
+/* ==========================================================================
+   その他
+   ========================================================================== */
+
+/* テキスト入力エリア（LineEdit / TextEdit） */
+QLineEdit, QTextEdit {
+    background-color: @bgInput@;
+    border: 1px solid @bgButton@;
+    border-radius: 4px;
+    padding: 4px;
+    color: @text@;
+}
+
+QLineEdit:focus, QTextEdit:focus {
+    border: 1px solid @accent@;
+}
+
+/* コンボボックス（ドロップダウン） */
+QComboBox {
+    background-color: @bgButton@;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 24px 4px 8px;
+    min-height: 18px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: none;
+}
+
+QComboBox:disabled {
+    background-color: @bgBase@;
+    color: @scrollHandleHover@;
+}
+
+/* スクロールバー */
+QScrollBar:vertical {
+    background: @bgBase@;
+    width: 8px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: @hoverBg@;
+    min-height: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: @scrollHandleHover@;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    background: none;
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background: @bgBase@;
+    height: 8px;
+    margin: 0px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background: @hoverBg@;
+    min-width: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal {
+    background: @bgBase@;
+    border: none;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    background: transparent;
+    width: 0px;
+    border: none;
+}
+
+QScrollBar::left-arrow:horizontal,
+QScrollBar::right-arrow:horizontal {
+    width: 0px;
+    height: 0px;
+    background: transparent;
+}
+
+/* 分割表示(複数キャンバスペイン)のアクティブペイン枠。ペインが1枚だけの通常時は
+   active プロパティが立たないため何も描かれず、既存の見た目のままになる。 */
+CanvasPane[active="true"] {
+    border: 2px solid @accent@;
+}
+
+/* ==========================================================================
+   キャプションボタン(OS標準のタイトルバーを出さず、メニューバー右端に置く
+   最小化/最大化/閉じる)
+   ========================================================================== */
+QWidget#captionButtons {
+    background-color: transparent;
+}
+
+QWidget#captionButtons QToolButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    min-width: 44px;
+    min-height: 26px;
+    font-size: 11pt;
+}
+
+QWidget#captionButtons QToolButton:hover {
+    background-color: @bgButton@;
+}
+
+QWidget#captionButtons QToolButton#captionClose:hover {
+    background-color: #c42b1c; /* Windows標準の閉じるボタンに合わせた赤 */
+    color: #ffffff;
+}

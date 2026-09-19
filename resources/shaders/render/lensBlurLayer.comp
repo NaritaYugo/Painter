@@ -1,0 +1,120 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// レンズぼかしフィルターレイヤー (Pro限定)
+// ---------------------------------------------------------------------------
+// 「これより下のレイヤーの合成結果」に玉ボケ(レンズの絞りの形のぼけ)をかける、
+// 非破壊フィルターレイヤー用。入出力ともキャンバス全面(canvasW x canvasH)の
+// 事前乗算アルファRGBA8で、GLWidget::rebuildFilterChain() が合成の途中結果に
+// 対して呼ぶ。サンプリング(Vogelスパイラル+ハイライト強調γ+絞りの多角形変形)の
+// 理屈は破壊的フィルター版(paint/lensBlurFilter.comp)のコメントを参照。
+//
+// 違いは chromaticAberrationLayer.comp / gaussianBlurLayer.comp と同じで、
+// 「不透明度×レイヤーマスク」の強さで元の合成結果へブレンドして仕上げる点と、
+// 入出力がキャンバス全面ちょうどなのでタイルパディング除外
+// (resolveCanvasSampleCoord)が不要で単純に画像境界へクランプすればよい点。
+// 破壊的フィルター版と同様、キャンバスのループ(ラップ)には対応していない。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform readonly  image2D uSrc; // ここまでの合成結果
+layout(rgba8, binding = 1) uniform writeonly image2D uDst;
+
+uniform float uRadiusPx;        // ぼけ半径(px)
+uniform int   uSamples;         // スパイラルのサンプル数
+uniform int   uBlades;          // 0=円, 3以上=正多角形の辺数
+uniform float uBladeRotRad;     // 多角形の回転(ラジアン)
+uniform float uBokehGamma;      // ハイライト強調のγ(1=無効)
+uniform float uThreshold;       // 玉ボケ対象にする明るさのしきい値(0..1)
+uniform float uHighlightBoost;  // しきい値超の画素に掛ける追加重み(0=無効)
+
+// 効果の強さ(フィルターレイヤーの不透明度)とレイヤーマスク。
+// 引き方は chromaticAberrationLayer.comp / gaussianBlurLayer.comp と同じ。
+uniform float uOpacity;
+uniform int   uMaskBase;          // このフィルターレイヤー自身のマスク(-1なら無し)
+uniform ivec4 uAncestorMaskBases; // 祖先フォルダー(最大4階層)のマスク(-1なら無し)
+uniform int   uTileSize;
+uniform int   uCanvasTilesX;
+
+#define MAX_BANKS 8
+uniform sampler2DArray layerTexBanks[MAX_BANKS];
+uniform int uSlicesPerBank;
+vec4 sampleTileArray(int si, vec2 uv) {
+    int bank = si / uSlicesPerBank;
+    float local = float(si - bank * uSlicesPerBank);
+    for (int b = 0; b < MAX_BANKS; b++)
+        if (b == bank) return textureLod(layerTexBanks[b], vec3(uv, local), 0.0);
+    return vec4(0.0);
+}
+
+float sampleMaskSlice(int base, ivec2 canvasPx) {
+    if (base < 0) return 1.0;
+    int tx = canvasPx.x / uTileSize;
+    int ty = canvasPx.y / uTileSize;
+    vec2 tileOrigin = vec2(tx * uTileSize, ty * uTileSize);
+    vec2 localUV = (vec2(canvasPx) + 0.5 - tileOrigin) / float(uTileSize);
+    return sampleTileArray(base + ty * uCanvasTilesX + tx, localUV).r;
+}
+
+float maskAlphaAt(ivec2 canvasPx) {
+    return sampleMaskSlice(uMaskBase, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.x, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.y, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.z, canvasPx)
+         * sampleMaskSlice(uAncestorMaskBases.w, canvasPx);
+}
+
+const float PI          = 3.14159265359;
+const float GOLDEN_ANGLE = 2.39996323; // 137.508° をラジアンにしたもの
+
+// 正多角形の、方向thにおける境界半径(外接円半径1で正規化)。円のときは1。
+float apertureScale(float th) {
+    if (uBlades < 3) return 1.0;
+    float n     = float(uBlades);
+    float sector = 2.0 * PI / n;
+    float a = mod(th - uBladeRotRad, sector) - sector * 0.5;
+    return cos(PI / n) / max(cos(a), 1e-4);
+}
+
+void main() {
+    ivec2 c  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(uSrc);
+    if (c.x >= sz.x || c.y >= sz.y) return;
+
+    vec4 origC = imageLoad(uSrc, c);
+
+    int   n = max(uSamples, 1);
+    float g = max(uBokehGamma, 1.0);
+
+    vec3  accumRGB = vec3(0.0); // γ空間のストレート色 × アルファ × 重み
+    float accumA   = 0.0;       // アルファ × 重み
+    float accumW   = 0.0;       // 重み
+
+    for (int i = 0; i < n; i++) {
+        float fi = float(i) + 0.5;
+        float rr = sqrt(fi / float(n));
+        float th = fi * GOLDEN_ANGLE;
+        vec2  offs = vec2(cos(th), sin(th)) * (rr * uRadiusPx * apertureScale(th));
+
+        ivec2 p = clamp(ivec2(round(vec2(c) + offs)), ivec2(0), sz - ivec2(1));
+        vec4 s = imageLoad(uSrc, p);
+        vec3 straight = (s.a > 0.0001) ? s.rgb / s.a : vec3(0.0);
+
+        float lum = dot(straight, vec3(0.2126, 0.7152, 0.0722));
+        float w   = 1.0 + uHighlightBoost * smoothstep(uThreshold, min(uThreshold + 0.25, 1.0), lum);
+
+        accumRGB += pow(straight, vec3(g)) * s.a * w;
+        accumA   += s.a * w;
+        accumW   += w;
+    }
+
+    vec4 blurred = vec4(0.0);
+    if (accumW > 0.0001 && accumA > 0.0001) {
+        vec3  avgStraight = pow(accumRGB / accumA, vec3(1.0 / g));
+        float a = accumA / accumW;
+        blurred = vec4(clamp(avgStraight, 0.0, 1.0) * a, a);
+    }
+
+    float amount = clamp(uOpacity * maskAlphaAt(c), 0.0, 1.0);
+    imageStore(uDst, c, mix(origC, blurred, amount));
+}

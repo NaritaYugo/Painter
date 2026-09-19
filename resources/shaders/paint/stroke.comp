@@ -1,0 +1,290 @@
+#version 430 core
+//COMMON_INCLUDE
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(r8, binding = 0) uniform image2D imgStrokeMask;
+// ストローク色バッファ。スタンプごとに色が変わるとき(色のランダム、将来の混色)だけ
+// 使う。値は「この画素へ置かれた色 × マスク値」(=マスクで事前乗算済み。不透明度は
+// 含めない)。uUseStrokeColor==0 のときはバインドされないので触ってはいけない。
+layout(rgba16f, binding = 1) uniform image2D imgStrokeColor;
+layout(binding = 1) uniform sampler2D uTipTex;
+// 紙質テクスチャ(グレースケール。明るいほどインクが乗る)。GL_REPEATで貼る。
+layout(binding = 2) uniform sampler2D uPaperTex;
+
+uniform vec2  uPosStart;
+uniform vec2  uPosEnd;
+uniform float uRadius;
+uniform float uHardness;
+uniform ivec2 uTileOffset; // タイル左上のキャンバス座標 (tx*TILE_SIZE, ty*TILE_SIZE)
+// 線分の周囲(半径ぶん)だけをディスパッチするための起点オフセット。
+// キャンバス全体ではなく、実際にブラシが触れうる矩形だけを処理することで
+// ストローク中の毎フレームのコストをキャンバスサイズに依存させないようにする。
+uniform ivec2 uDispatchOrigin;
+// 0: 従来の手続き的な円(消しゴム用)。1: uTipTexの形状をスタンプとして使う(ペン用)。
+uniform int   uUseTipTexture;
+uniform int   uWrapX; // キャンバスの左右ループが有効か
+uniform int   uWrapY; // キャンバスの上下ループが有効か
+
+// バッチスタンプモード(PenEraserTool専用)。ペンタブは1マウスイベントの間でも
+// 複数のスタンプを打つことがあり、さらに複数の入力イベント(フレームレート律速
+// バッチ、GLWidget::paintGL/Tool::flushPendingInput参照)ぶんをまとめて渡す
+// こともあるため、スタンプごとにdispatch+barrierを繰り返すのを避けて1回の
+// dispatchでまとめて処理する。筆圧で半径が変わりうるので、位置に加えて
+// スタンプごとの半径も持たせる(xy=キャンバス座標, z=半径)。
+// (数学的な等価性: 各スタンプのアルファを合算してから最後に1回min(1,x)で
+// クランプするのは、スタンプごとに逐次min(1,現在値+アルファ)するのと同じ結果に
+// なる。min(1,x)は単調なので、一度1.0に達すればそれ以降何を足しても1.0のまま)。
+// 他のツール(Blur/Warp/ペン選択の投げ縄的ドラッグ)は同じcomputeDrawProgramを
+// 線分モード(uPosStart/uPosEnd、半径はuRadius固定)のまま引き続き使うため、
+// 既定値0で無効。vec4のうちwは未使用(std430でvec3配列にすると要素が16バイト
+// 境界に切り上げられ、CPU側のタイトパックしたバッファと整合しなくなるため、
+// 素直にvec4で確保している)。
+// スタンプ1つにつき vec4 を3つ使う:
+//   [3*i+0] = (キャンバス座標 x, y, 半径, 濃度)
+//   [3*i+1] = (cos(角度), sin(角度), 真円率, 未使用)
+//   [3*i+2] = (色r, 色g, 色b, 未使用) … uUseStrokeColor!=0 のときだけ使う。
+//             不透明度を含まない素の色(0〜1)。
+// 角度は先端画像のランダム回転用。三角関数はこのループが画素ごとに回るため、
+// CPU側で cos/sin まで計算して渡す(先端画像を使わないときは (1,0) が入る)。
+// vec4 で確保しているのは、std430 で vec3/vec2 配列にすると要素が16バイト境界へ
+// 切り上げられ、CPU側のタイトパックしたバッファと整合しなくなるため。
+layout(std430, binding = 2) readonly buffer StampBuf { vec4 uStampData[]; };
+uniform int   uUseStampBatch;
+uniform int   uStampCount;
+
+// 筆圧→不透明度。有効(1)のとき、vec4のw(従来は未使用の詰め物)をそのスタンプの
+// 濃度として使う。値は「このブラシの全力に対する割合」(0〜1)で、ストロークの
+// 不透明度は含まない(不透明度はbake.comp/render.fragがuBrushColor側で一度だけ掛ける)。
+//
+// マスクの意味づけはどちらの場合も「このブラシの全力のうち、この画素にどれだけ
+// 乗るか」(0〜1)で一貫している:
+//   uUseStampAlpha == 0 … マスク = カバレッジ(形)そのもの
+//   uUseStampAlpha == 1 … マスク = カバレッジ × スタンプごとの濃度
+// 下の紙質も同じ「濃度」として扱うため、紙質が有効なときは呼び出し側が
+// 必ずこちらを1にする(PenEraserTool::usesStampAlpha)。
+uniform int   uUseStampAlpha;
+
+// フロー。1スタンプが「到達しうる濃さ」へどれだけ近づけるか(0〜1)。
+// 1.0で1スタンプでも上限に達する(=従来どおり)。下げるほど、同じ場所に
+// スタンプが重なった数だけ濃くなっていく。バッチ経路(ペン/消しゴム)専用で、
+// 呼び出し側は消しゴム等フローを持たないツールでは1.0を渡す。
+uniform float uFlow;
+
+// スタンプごとの色を使うか。1のとき imgStrokeColor へも同じ規則で色を積む。
+// 0のときは従来どおりマスクだけを扱い、色は焼き込み側の1色(uBrushColor)になる。
+uniform int   uUseStrokeColor;
+
+// 紙質テクスチャ。
+//
+// 「キャンバス座標に貼り付ける」のが要点で、ストロークやスタンプには一切
+// 追従させない。そうすることで、同じ場所を何度なぞっても、あとから別の
+// ストロークを重ねても、紙の目の位置が必ず揃う(実際の紙と同じ挙動)。
+//
+// uPaperStrength: 0で無効。1.0で画像の明暗をそのまま濃度に使う。
+// uPaperScale   : 拡大率。1.0で画像1テクセルがキャンバス1pxに対応する。
+// uPaperLod     : ミップレベル。縮小して貼るとき(拡大率<1)にモアレが出るため、
+//                 拡大率から求めた固定値をCPU側から渡す。コンピュートシェーダーは
+//                 微分が使えないので texture() ではなく textureLod() を使う必要が
+//                 あり、どのみちLODは自前で決めなければならない。
+uniform float uPaperStrength;
+uniform float uPaperScale;
+uniform float uPaperLod;
+
+// このキャンバス位置での紙質による濃度係数(1.0で紙の影響なし)。
+float paperFactor(vec2 canvasPos) {
+    if (uPaperStrength <= 0.0) return 1.0;
+    // uvは正規化座標なので、画像の実寸(と拡大率)で割ってから渡す。
+    // ラップはGL_REPEATなので、キャンバスが画像より大きければそのまま敷き詰まる。
+    vec2 uv = canvasPos / (vec2(textureSize(uPaperTex, 0)) * uPaperScale);
+    float t = textureLod(uPaperTex, uv, uPaperLod).r;
+    return mix(1.0, t, uPaperStrength);
+}
+
+vec2 nearestPointOnSegment(vec2 p, vec2 a, vec2 b) {
+    vec2 ab = b - a;
+    if (dot(ab, ab) < 0.0001) return a;
+    float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+    return a + t * ab;
+}
+
+// 縁に必ず確保する遷移幅(キャンバスpx)。
+//
+// 硬さによるフォールオフの遷移幅は radius*(1-uHardness) なので、細いブラシや
+// 硬いブラシでは1px未満になる(半径0.5px・硬さ0.9なら0.05px、硬さ1.0なら0)。
+// そうなると画素ごとのアルファが実質0か1の二値になり、輪郭が階段状になる。
+// 1画素またぐぶんの階調を必ず持たせることで、細い線でもアンチエイリアスが効く。
+const float kEdgeAA = 1.0;
+
+// 硬さのフォールオフ幅を求めるときに、半径へ加算する下駄(キャンバスpx)。
+//
+// 幅を半径にそのまま比例させると、細いブラシでは硬さを最小にしても数px以下の
+// 幅にしかならず、スライダーを動かしてもほとんど変化が見えない(半径1pxなら
+// 硬さ0でも幅1px)。
+//
+// 基準長を max(radius, kSoftRefPx) にすると細いブラシは救えるが、半径が
+// kSoftRefPx を跨ぐところで効き方が折れ曲がって不連続になる。単純に加算すれば
+//   基準長 = radius + kSoftRefPx
+// となり、どの半径でも滑らかに変化し、かつ太いブラシでも従来より柔らかい側へ
+// 余裕が出る(半径が大きいほど加算分の比率は小さくなるので、効き方の傾向自体は
+// 従来と変わらない)。
+const float kSoftRefPx = 8.0;
+
+// 柔らかくしたときに外周を半径より外へ広げる割合。
+//
+// 幅が半径を超える(=細いブラシを柔らかくした)場合、超えた分をどれだけ外へ
+// 逃がすかを決める。0にすると太らないが、フォールオフが中心まで食い込んで
+// ほとんど消えてしまう。大きくすると濃さは保てるが目に見えて太くなる。
+// 「柔らかいときは薄くなってよい。ただし太くはしない」という方針で、
+// 消えない程度まで下げた値。
+const float kSoftOutwardRatio = 0.15;
+
+// フォールオフ幅の上限(半径の何倍まで)。
+//
+// 上の割合を小さくしたぶん、幅が半径に対して大きすぎると中心まで薄くなり
+// ブラシが消えてしまう。ここで頭打ちにして最低限の濃さを残す
+// (この値では中心のアルファがおよそ0.4を下回らない)。
+const float kMaxFalloffVsRadius = 3.0;
+
+// 1本の線分(a==bなら点スタンプ)がcanvasPosへ与えるブラシアルファ。
+// rot は先端画像を回す量 (cosθ, sinθ)。回さないときは (1, 0)。
+// roundness は先端の真円率。1.0で真円、小さいほど短軸方向へ潰れた楕円になる
+// (平筆・カリグラフィ用)。傾きで潰す設定があるためスタンプごとに変わりうる。
+float sampleBrushAlpha(vec2 canvasPos, vec2 a, vec2 b, float radius, vec2 rot, float roundness) {
+    vec2 nearest = nearestPointOnSegment(canvasPos, a, b);
+
+    // ブラシのローカル座標(rotで回した系)へ移し、短軸方向を 1/roundness 倍に
+    // 引き伸ばす。こうすると以降は「半径 radius の真円」としてそのまま扱えるので、
+    // 硬さのフォールオフも外周の計算も真円のときと同じ式を一切変えずに使える。
+    //
+    // roundness == 1.0 のときは単なる回転なので length() は変わらず、
+    // 結果は回転を入れる前と完全に同一になる(=既定状態では無変化)。
+    vec2 d = canvasPos - nearest;
+    vec2 local = vec2(d.x * rot.x + d.y * rot.y,
+                     -d.x * rot.y + d.y * rot.x);
+    local.y /= max(roundness, 0.01);
+    float dist = length(local);
+
+    // 硬さ = 「中心から離れるほど不透明度を下げる」半径方向のフォールオフ。
+    // 基準長は radius + kSoftRefPx(細いブラシでも効かせるための下駄。上のコメント参照)。
+    // 硬い側は kEdgeAA(=1px)を下限にして、縁が二値にならないようにする。
+    float falloffPx = max((1.0 - uHardness) * (radius + kSoftRefPx), kEdgeAA);
+    // 中心まで薄くなってブラシが消えないよう、幅は半径の一定倍で頭打ちにする
+    falloffPx = min(falloffPx, max(radius * kMaxFalloffVsRadius, kEdgeAA));
+
+    // 遷移の振り分け。幅が半径に収まるうち(太いブラシ、または硬めの設定)は
+    // 外へはみ出さないので「アルファ0.5になる位置」は radius のままで、
+    // 見た目の太さは従来と変わらない。
+    // 幅が半径を超えるとき(細いブラシを柔らかくしたとき)だけ、超えた分を
+    // kSoftOutwardRatio の割合だけ外側へ逃がす。逃がす量を抑えてあるので、
+    // 柔らかくすると太るのではなく薄くなる方向に振れる。
+    float outer = radius + max(0.0, (falloffPx - radius) * kSoftOutwardRatio);
+    if (dist > outer) return 0.0;
+
+    float inner   = outer - falloffPx;
+    float falloff = 1.0 - smoothstep(inner, outer, dist);
+
+    if (uUseTipTexture != 0) {
+        // 正規化は radius ではなく outer で行う。柔らかい設定では外周が radius より
+        // 外へ広がるため、radius で割ると uv が [0,1] をはみ出す。先端画像は
+        // CLAMP_TO_EDGE なので、はみ出した分は画像の縁の画素が外側へ引き伸ばされ、
+        // スタンプごとに「手で払ったようなにじみ」が出ていた。
+        //
+        // 形と同じローカル座標(回転+短軸の引き伸ばし済み)から uv を作るので、
+        // 先端画像も一緒に回り、真円率のぶんだけ潰れる。
+        vec2 uv = local / (2.0 * outer) + 0.5;
+        float tipAlpha = texture(uTipTex, uv).a;
+        return tipAlpha * falloff;
+    }
+    return falloff;
+}
+
+void main() {
+    // texCoordは「生の」キャンバス座標(ラップ有効な軸ではディスパッチ範囲が
+    // キャンバス範囲外まで広がるため、負値やtexSizeを超える値も取り得る)。
+    // ブラシの形状(距離判定)はこの生座標のまま計算し、書き込み先だけを
+    // 別途ラップする(スタンプの形そのものは歪ませないため)。
+    ivec2 texCoord = uDispatchOrigin + ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize  = imageSize(imgStrokeMask);  // canvasW x canvasH
+
+    // ラップが無効な軸は、従来通りキャンバス範囲外を弾く
+    if (uWrapX == 0 && (texCoord.x < 0 || texCoord.x >= texSize.x)) return;
+    if (uWrapY == 0 && (texCoord.y < 0 || texCoord.y >= texSize.y)) return;
+
+    // 書き込み先座標(ラップ有効な軸だけ周回させる)
+    ivec2 writeCoord = texCoord;
+    if (uWrapX != 0) writeCoord.x = ((texCoord.x % texSize.x) + texSize.x) % texSize.x;
+    if (uWrapY != 0) writeCoord.y = ((texCoord.y % texSize.y) + texSize.y) % texSize.y;
+
+    // キャンバス座標系でブラシ距離を計算(生のtexCoordを使う。ラップ書き込み先の
+    // writeCoordを使うとスタンプ形状が折れ曲がってしまうため)。
+    // +0.5はテクセルの中心を指すためのオフセット。render.frag側のmaskTexサンプリング
+    // (texture()の正規化UV。テクセルiの中心は連続座標i+0.5)や、マウス座標
+    // (widgetToPixelが返す連続座標)と揃えないと、ブラシがマウス位置から半px
+    // ずれて描かれてしまう(カーソル表示位置と実際の塗り位置がずれる原因だった)。
+    vec2 canvasPos = vec2(texCoord) + 0.5;
+
+    float currentMask = imageLoad(imgStrokeMask, writeCoord).r;
+    float newMask;
+
+    if (uUseStampBatch != 0) {
+        // 紙質はこの画素について(ストロークの間ずっと)不変なので、ループの外で1回だけ。
+        //
+        // 紙質を「カバレッジ側」ではなく「濃度側」に掛けるのが要点。カバレッジに
+        // 掛けると下の漸化式が 1-(1-cov*紙)^n になり、スタンプが10個前後重なる線の
+        // 内側では紙の値によらず1.0へ飽和して、紙の目がきれいに消えてしまう。
+        float paper = paperFactor(canvasPos);
+
+        // スタンプを1つずつ順に「乗せて」いく。
+        //
+        //   m ← m + target*dep - m*dep      (target = このスタンプが到達する濃さ,
+        //                                     dep    = 今回どれだけ近づけるか)
+        //
+        // これは「mをtargetへ dep の割合だけ寄せる」式で、
+        //   ・dep = カバレッジそのもの(フロー100%)なら、従来どおりの
+        //     「カバレッジのunion × 濃度」に完全に一致する
+        //     (2枚で m = t*(c1+c2-c1*c2) となることを代入すれば確かめられる)。
+        //   ・dep = カバレッジ × フロー(<100%)なら、1スタンプではtargetに届かず、
+        //     重なった数だけ target へ近づく(=フロー)。
+        //
+        // 合成を「和」にしないのは、スタンプが密に重なる縁の画素で部分カバレッジが
+        // 足し合わさってすぐ1.0へ飽和し、縁に持たせたはずの階調が潰れて輪郭が
+        // 階段状になるため(スタンプ間隔は既定でブラシ直径の10%なので、縁の画素には
+        // 常に10個前後のスタンプが少しずつ被さる)。
+        //
+        // currentMask から始めるので、バッチをまたいでも同じ規則で繋がる
+        // (ここを「バッチ内だけで合成してから1回で乗せる」形にすると、バッチの
+        //  継ぎ目にあたる画素だけ薄くなり、線の縁にバッチ周期のまだらが出る)。
+        float m = currentMask;
+        // 色も全く同じ漸化式で積む(色はマスクで事前乗算した形で持つ)。
+        // 色が一定なら C == 色 × m が保たれるので、1色経路と同じ結果になる。
+        // マスクが0の画素は「まだ何も置かれていない」ので、色バッファに前のストロークの
+        // 残りがあっても0から始める(色バッファ側をクリアする必要が無い)。
+        vec3 C = (uUseStrokeColor != 0 && currentMask > 0.0)
+               ? imageLoad(imgStrokeColor, writeCoord).rgb : vec3(0.0);
+        for (int i = 0; i < uStampCount; i++) {
+            vec4 d0 = uStampData[3 * i];
+            vec4 d1 = uStampData[3 * i + 1];
+            vec2 p  = d0.xy;
+            float cov = sampleBrushAlpha(canvasPos, p, p, d0.z, d1.xy, d1.z);
+            if (cov <= 0.0) continue;
+            float target = ((uUseStampAlpha != 0) ? d0.w : 1.0) * paper;
+            float dep    = cov * uFlow;
+            m = m + target * dep - m * dep;
+            if (uUseStrokeColor != 0) {
+                vec3 stampRGB = uStampData[3 * i + 2].rgb;
+                C = C + stampRGB * target * dep - C * dep;
+            }
+        }
+        newMask = m;
+        if (uUseStrokeColor != 0)
+            imageStore(imgStrokeColor, writeCoord, vec4(C, 1.0));
+    } else {
+        // 線分モード(エアブラシ/ぼかし/ゆがみ/ペン選択)は先端画像も平筆も使わないので
+        // 回転なし・真円で固定(uniformを持たせないぶん、呼び出し側で戻し忘れる余地がない)。
+        // 「重ねるほど濃くなる」動作そのものが機能なので、従来どおり加算のまま残す。
+        float brushAlpha = sampleBrushAlpha(canvasPos, uPosStart, uPosEnd, uRadius,
+                                            vec2(1.0, 0.0), 1.0);
+        newMask = min(1.0, currentMask + brushAlpha);
+    }
+    imageStore(imgStrokeMask, writeCoord, vec4(newMask, 0.0, 0.0, 0.0));
+}

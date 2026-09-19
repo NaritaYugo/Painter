@@ -1,0 +1,43 @@
+#version 430 core
+//COMMON_INCLUDE
+
+// ---------------------------------------------------------------------------
+// グラデーションマップ (Pro限定、処理>色調補正メニュー用、確定時の焼き込み)
+// ---------------------------------------------------------------------------
+// 各ピクセルの「明るさ(輝度)」だけを見て、その値をグラデーション上の位置とみなし、
+// 対応する色に置き換える。暗い部分にグラデーションの左端の色、明るい部分に右端の色が
+// 割り当たるので、モノクロ化+着色を一度に行ったような結果になる。
+//
+// トーンカーブと同じく、任意形状のグラデーションを毎回GLSLで組み立てるのは非効率
+// なので、GradientMapTool側がCPUで256エントリのLUT(輝度0-255 -> RGB)を作って
+// 256x1のRGBA8テクスチャ(ctx.gradientMapLUTTex)へアップロードしてある。ここでは
+// それをサンプルするだけ(プレビューのrender.frag側も同じLUTを見る)。
+//
+// アルファは変更しない。乗算済みアルファなのでストレート色へ割り戻してから輝度を
+// 求め、置き換えた色に再びアルファを掛けて戻す。
+// ---------------------------------------------------------------------------
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba8, binding = 0) uniform image2D          layerTex;   // 読み書き両用(自ピクセルのみ触るので安全)
+layout(r8,    binding = 1) uniform readonly image2D selMaskTex; // 未選択時は全域255(=全体に適用)
+
+layout(binding = 2) uniform sampler2D uLut; // 256x1, RGBA8。輝度を横位置として引く
+
+void main() {
+    ivec2 p  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(layerTex);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+
+    if (imageLoad(selMaskTex, p).r <= 0.0) return;
+
+    vec4 c = imageLoad(layerTex, p);
+    if (c.a <= 0.0001) return;
+
+    vec3 rgb = c.rgb / c.a; // unpremultiply
+    // 輝度の重み付けは common.glsl の blendLuma()(Photoshopの輝度系ブレンドと同じ係数)を使う
+    float lum = blendLuma(rgb);
+    vec3 mapped = texture(uLut, vec2(clamp(lum, 0.0, 1.0), 0.5)).rgb;
+    c.rgb = mapped * c.a;
+
+    imageStore(layerTex, p, c);
+}
