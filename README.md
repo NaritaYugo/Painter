@@ -2,7 +2,7 @@
 - デザインが固定化されていたペイントツールを1から見直して、絵を描く際に使いやすい独自機能を盛り込んだペイントソフトです
 - QtとOpenGLを使用しています
 
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/f74ada44-d46d-4380-8862-a62d944bf01b" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/185b89ec-b820-4562-ab32-a80f84a79ca3" />
 
 
 ## オリジナル機能
@@ -11,7 +11,8 @@
 - 本アプリでは、クリッピングマスクを横方向に転回し、レイヤーの種類に応じて色や形を分けることで、常にレイヤーの依存関係を1画面で把握できるようにしています。
 - このツリーは、レイヤー移動時に真価を発揮します。常にすべてのレイヤーが見えているため、レイヤーの移動が簡単です。
 
-<img width="3566" height="1764" alt="イラスト" src="https://github.com/user-attachments/assets/44739529-bf75-4c05-8645-4a5781da260e" />
+<img width="3566" height="1764" alt="イラスト" src="https://github.com/user-attachments/assets/f05b5789-3e81-4033-bfab-4169a3446422" />
+
 
 #### OKLCHカラーサークル
 - 近年、CSS等、人間の知覚に基づいて色を選択できる**OKLCH色空間**が採用される例が増えてきましたが、色空間の形状が対称的ではなく、ペイントソフトのUIには使用されていませんでした。
@@ -28,6 +29,7 @@
   という独自のアルゴリズムで、高速かつ正確に判定しています。
 
 <img width="3566" height="1764" alt="イラスト3" src="https://github.com/user-attachments/assets/a536eec5-908e-4428-9af2-1a099e829fcb" />
+
 - 以下の手順でO(N)で塗りつぶせます
   - JFAによってSDFを作成
   - SDFが閾値 $R$ 未満の領域narrowと $R$ 以上の領域deepに分ける
@@ -138,6 +140,7 @@ Painter/
 ### 処理
 - src/actions/：フィルターや変形など、画像に対して操作を適用する処理
 
+## 依存関係
 <img width="1013" height="512" alt="image" src="https://github.com/user-attachments/assets/aeb51ba9-91cc-40dc-a9c0-9ce48afc1c8c" />
 
 
