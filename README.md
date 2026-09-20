@@ -4,11 +4,6 @@
 
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/f74ada44-d46d-4380-8862-a62d944bf01b" />
 
-## 目次
-- オリジナル機能
-- 機能一覧
-- リポジトリ構成
-
 
 ## オリジナル機能
 #### ツリー形式のレイヤービュー
@@ -56,61 +51,95 @@ GLSL（OpenGL Shading Language）を用いて、元の色から変換後の色�
 
 ## 機能一覧
 通常のペイントソフトにある機能の多くに対応しています。
-- ファイル
-  - 独自形式.tploの読み込み・書き出し
-  - Photoshopドキュメント.psdの読み込み・書き出し
-  - png、jpegの読み込み・書き出し
-  - Photoshopのブラシファイル.abrの読み込み・書き出し
-- 処理
-  - 変形(2種類)
-  - 色調補正(5種類)
-  - 効果(2種類)
-  - カスタムシェーダー
-- ツール
-  - ペン
-  - 消しゴム
-  - エアブラシ
-  - 塗りつぶし
-  - スポイト
-  - 移動
-  - 回転
-  - ぼかし
-  - ゆがみ
-  - テキスト
-- ツール設定
-  - ブラシ先端画像の設定
-  - 手振れ補正
-  - サイズ・不透明度・硬さ変更等
-- レイヤー
-  - 合成モード(27種類)
-  - クリッピングマスク
-  - レイヤーマスク
-  - レイヤーフォルダ
-  - テキストレイヤー
-  - 単色レイヤー
-  - レイヤーフィルター
+- ファイル：独自形式tploのほか、psd、png、jpeg、abrに対応
+- 処理：変形(2種類)、色調補正(5種類)、効果(2種類)、カスタムシェーダー
+- ツール：ペン、消しゴム、エアブラシ、塗りつぶし、スポイト、移動、回転、ぼかし、ゆがみ、テキスト
+- ツール設定：ブラシ先端画像、手振れ補正等
+- レイヤー：合成モード(27種類)、クリッピングマスク、レイヤーマスク、レイヤーフォルダ、テキストレイヤー、レイヤーフィルター
 
-## リポジトリ構成
-Painter<br>
-├─ platform/ windows用アプリアイコン<br>
-├─ resources/<br>
-│　 ├─ icons/ アイコン素材<br>
-│　 ├─ textures/ テクスチャ素材<br>
-│　 ├─ text/ 初期レイアウト保存用<br>
-│　 └─ shaders/<br>
-│　 　　 ├─ fill/ 塗りつぶし用<br>
-│　 　　 ├─ header/ 共通のインクルード用ファイル<br>
-│　 　　 ├─ paint/ 描画系<br>
-│　 　　 └─ render/ レイヤー合成、表示<br>
-└─ src/<br>
-　　 ├─ actions/ 画像処理などをアクション化して、ショートカットに割り当てられるようにする<br>
-　　 ├─ shortcuts/ キーボードショートカット関連<br>
-　　 │
-　　 ├─ docks/ ツール、カラーサークル等のUIウィンドウ<br>
-　　 ├─ components/ UI素材<br>
-　　 ├─ dialogs/ 画像処理時のUIパネル等のダイアログ<br>
-　　 │
-　　 ├─ backend/ ウィンドウに紐づかない処理類<br>
-　　 └─ widgets/ ウィジェット系<br>
-　　 　　 ├─ CanvasTab系 キャンバスをタブ化して複数開けるようにする<br>
+## フォルダ構成
+```
+Painter/
+├─ platform/
+│  └─ Windows向けリソース、アプリアイコン
+│
+├─ resources/
+│  ├─ icons/       各種アイコン画像
+│  ├─ textures/    ブラシ先端、紙質テクスチャ
+│  ├─ shaders/
+│  │  ├─ fill/     塗りつぶし用
+│  │  ├─ header/   GLSLの共通インクルード用
+│  │  ├─ paint/    画像更新
+│  │  └─ render/   レイヤー合成、表示
+│  ├─ texts/       バージョン、初期レイアウト
+│  ├─ style.qss    アプリ全体のQtスタイル
+│  └─ resources.qrc
+│
+├─ src/
+│  ├─ app/         メインウィンドウとアプリ全体の制御
+│  ├─ canvas/      キャンバス、タブ、入力、描画処理の統合
+│  ├─ document/    ドキュメント・レイヤー・Undoのデータモデル
+│  ├─ rendering/   GPUレイヤー管理、シェーダー、合成処理
+│  ├─ io/          PSD、ABR等のI/O
+│  ├─ licensing/   Pro版のライセンス検証
+│  ├─ actions/     画像編集処理
+│  ├─ tools/
+│  │  ├─ core/     ツール共通インターフェース・設定・実行環境
+│  │  ├─ canvas/   ペンなど、キャンバス上で継続使用するツール
+│  │  └─ actions/  アクション内部で使用する画像処理ツール
+│  ├─ docks/       レイヤー、カラー、ツールなどのドックUI
+│  ├─ dialogs/     設定・画像処理用のダイアログやパネル
+│  ├─ components/  UIパーツ
+│  └─ shortcuts/   キーボードショートカット関連
+│
+├─ tools/
+│  └─ license/     Pro版ライセンスの生成
+│
+├─ CMakeLists.txt
+├─ CMakePresets.json
+└─ vcpkg.json
+```
+
+## 設計の概要
+### 入口～メインウィンドウ
+- src/main.cpp：初期化、MainWindow作成
+- src/app/：全体のウィンドウ
+  - MainWindowWorkspace：ワークスペース
+  - MainWindowChrome：タイトルバーなどの外観
+  - MainWindowFiles：ファイル操作
+  - MainWindowSettings：設定の反映と保存
+  - MainWindowEvents：ウィンドウイベント
+  - MainWindowShortcuts：ショートカット
+  - MainWindowNative：Windows固有処理
+### キャンバス
+- src/canvas/：OpenGLを使ったキャンバスウィジェット
+  - CanvasWidgetRendering：OpenGL初期化、ペイント、画面表示
+  - CanvasWidgetInput：ペン入力
+  - CanvasWidgetLayers：レイヤー操作
+  - CanvasWidgetCompositing：GPU上のレイヤー合成と画像取得
+  - CanvasWidgetGeometry：キャンバスサイズ
+  - CanvasWidgetSelection：選択範囲
+  - CanvasWidgetUndo：Undo / Redo
+  - CanvasWidgetActions：処理アクション
+### ドキュメント
+- src/document/CanvasDocument：キャンバスをタイルに区切って保持
+### ドック
+- src/docks/：メインウィンドウ上に自由に配置できるUIドック
+   - BrushSizeDock：ブラシサイズ
+   - ColorCircleDock：カラーサークル
+   - NavigatorDock：ナビゲーター(キャンバスプレビュー、移動)
+   - ToolDock：ツール
+   - ToolPropertyDock：ツールプロパティ(ツールの詳細設定)
+   - ToolPresetDock：ツールプロパティの保存
+   - LayerDock：レイヤー
+   - layers/：レイヤーUIパーツ
+### ツール
+- src/tools/canvas/：ペン・消しゴムなど、どれかを選択してキャンバスに対して使用するツール
+### 処理
+- src/actions/：フィルターや変形など、画像に対して操作を適用する処理
+
+<img width="1013" height="512" alt="image" src="https://github.com/user-attachments/assets/aeb51ba9-91cc-40dc-a9c0-9ce48afc1c8c" />
+
+
+
 
