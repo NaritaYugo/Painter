@@ -43,9 +43,9 @@
 
 <img width="1014" height="521" alt="image" src="https://github.com/user-attachments/assets/007b0c98-f93e-4add-8659-361ac5e0b88f" />
 
-
 #### 自由にGLSLを書けるカスタムシェーダー
-GLSL（OpenGL Shading Language）を用いて、元の色から変換後の色を計算する独自のプログラムを組み込めます。手描きでは困難な精密なグラデーションや幾何学パターンの生成など、テクスチャ作成を強力にサポート。アイデア次第で、オリジナルの画像編集エフェクトやフィルターを自作することも可能です。
+- GLSLを用いて、元の色から変換後の色を計算する独自のプログラムを組み込めるカスタムシェーダー機能。
+- 手描きでは困難なグラデーションや幾何学パターンや、オリジナルのフィルターを自作できます。
 
 <img width="835" height="868" alt="image" src="https://github.com/user-attachments/assets/19756f32-df0e-4b30-8da5-1dbae6aee249" />
 
