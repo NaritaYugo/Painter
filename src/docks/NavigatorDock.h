@@ -4,7 +4,7 @@
 #include <QImage>
 #include <QMetaObject>
 
-class GLWidget;
+class CanvasWidget;
 class QPushButton;
 class QSlider;
 class QTimer;
@@ -17,16 +17,16 @@ class NavigatorDock : public QWidget
 {
     Q_OBJECT
 public:
-    explicit NavigatorDock(GLWidget *gl, QWidget *parent = nullptr);
+    explicit NavigatorDock(CanvasWidget *gl, QWidget *parent = nullptr);
 
     void refresh(); // 外部から呼んでプレビューを更新する
 
-    // GLWidget::layersChanged()から呼ぶ想定。フルキャンバス合成+glReadPixelsを伴う
+    // CanvasWidget::layersChanged()から呼ぶ想定。フルキャンバス合成+glReadPixelsを伴う
     // refresh()を、連続発火時にまとめて最後の1回だけ実行する(デバウンス)。
     void scheduleRefresh();
 
-    // タブ切替時に、表示対象のGLWidget(=キャンバス)を差し替える
-    void setGLWidget(GLWidget *gl);
+    // タブ切替時に、表示対象のCanvasWidget(=キャンバス)を差し替える
+    void setCanvasWidget(CanvasWidget *gl);
 
     static constexpr int BASE_WIDTH  = 200;
     static constexpr int BASE_HEIGHT = 200;
@@ -41,7 +41,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
-    GLWidget    *glWidget    = nullptr;
+    CanvasWidget    *glWidget    = nullptr;
     QMetaObject::Connection viewChangedConn_;
     QTimer      *refreshDebounceTimer_ = nullptr; // scheduleRefresh()用(singleShot、都度restart)
     QPushButton *btnCanvas   = nullptr; // キャンバス全体

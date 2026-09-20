@@ -9,7 +9,7 @@
 // (=解像度)だけを変える。つまり全レイヤーの内容を新しい解像度へ拡大縮小(リサンプル)
 // する操作で、キャンバス上のドラッグ操作は無く、値はImageResolutionPanel(実際の
 // QWidget: 幅/高さのQSpinBox + 縦横比ロック)から setSize() 経由で渡される。
-// 確定時はGLWidget::resampleCanvasResolutionへ委譲するだけなので、直接GPU関数は
+// 確定時はCanvasWidget::resampleCanvasResolutionへ委譲するだけなので、直接GPU関数は
 // 呼ばない(HueSatLightToolと違いQOpenGLFunctionsの継承も不要)。
 // ---------------------------------------------------------------------------
 class ImageResolutionTool

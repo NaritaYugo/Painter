@@ -24,14 +24,14 @@
 // (ユーザーコードは近傍サンプリングも書けてしまうため、毎フレームの直接実行は
 // 重すぎる可能性があるのと、GLSLコンパイルコスト自体もフレームごとには払えないため)。
 // setSource()はデバウンスされた入力の確定時にのみ呼ばれる想定(呼び出し側=
-// CustomShaderPanel/GLWidgetの責務)。
+// CustomShaderPanel/CanvasWidgetの責務)。
 // ---------------------------------------------------------------------------
 class CustomShaderTool : protected QOpenGLFunctions_4_3_Core
 {
 public:
     void initialize(QOpenGLContext *ctx);
     // GL資源(動的コンパイル済みプログラム)の解放。GLコンテキストがまだ有効な
-    // 間にGLWidgetのデストラクタから明示的に呼ぶこと(暗黙のメンバ破棄はdoneCurrent()の後になるため)。
+    // 間にCanvasWidgetのデストラクタから明示的に呼ぶこと(暗黙のメンバ破棄はdoneCurrent()の後になるため)。
     void releaseGL();
 
     void activate(ToolContext &ctx);   // アクション開始: レイヤーを集約する

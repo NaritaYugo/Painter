@@ -10,8 +10,8 @@
 // ---------------------------------------------------------------------------
 // CanvasActionController
 // ---------------------------------------------------------------------------
-// GLWidget が1つ保持する、全 CanvasAction の所有者兼ディスパッチャ。
-// 以前 GLWidget に散らばっていた以下を1箇所に集約する:
+// CanvasWidget が1つ保持する、全 CanvasAction の所有者兼ディスパッチャ。
+// 以前 CanvasWidget に散らばっていた以下を1箇所に集約する:
 //   - 相互排他: 新しいアクションを start する前に、今アクティブなアクションを cancel する
 //     (各 startXxxAction 冒頭の巨大な cancel リストを置き換える)。
 //   - 描画 uniform / オーバーレイ / パネル位置 / マウス横取り / 入力ブロック判定を、
@@ -57,7 +57,7 @@ public:
 
     // GL 初期化(全アクションの initialize を呼ぶ)。
     void initializeAll(QOpenGLContext *ctx);
-    // GLWidget デストラクタから、GLコンテキストがまだ有効なうちに呼ぶ(全アクションの releaseGL)。
+    // CanvasWidget デストラクタから、GLコンテキストがまだ有効なうちに呼ぶ(全アクションの releaseGL)。
     void releaseAllGL();
 
     // paintGL / resizeGL からの委譲。
@@ -72,7 +72,7 @@ public:
     bool routeMouseDoubleClick(QMouseEvent *e, ToolContext &ctx);
 
     // キーボードショートカット(Shift+WASD)による平行移動。アクティブなアクションが
-    // 実際に処理したら true(GLWidget側はこの場合 nudgeActiveLayer 等へフォールバックしない)。
+    // 実際に処理したら true(CanvasWidget側はこの場合 nudgeActiveLayer 等へフォールバックしない)。
     bool nudgeActive(const QVector2D &delta);
 
 private:

@@ -16,7 +16,7 @@
 //   ・選択中ボックスの周囲(枠のすぐ外)をドラッグ -> 回転
 //   ・ボックスをダブルクリック         -> 編集パネルを開く(再編集)
 // 移動中は他ボックスの端/キャンバス中央(x,y各軸)にスナップする。
-// 実際のパネル管理・ラスタライズはGLWidget側(ToolContext::startOrEditTextBox/
+// 実際のパネル管理・ラスタライズはCanvasWidget側(ToolContext::startOrEditTextBox/
 // requestTextRasterize経由)が担当する。
 // ---------------------------------------------------------------------------
 class TextTool : public Tool

@@ -1,5 +1,5 @@
 #include "docks/ToolPresetDock.h"
-#include "widgets/GLWidget.h"
+#include "canvas/CanvasWidget.h"
 #include "tools/core/ToolConfig.h"
 #include "tools/core/ToolRegistry.h"
 #include "components/ThemeColors.h"
@@ -121,7 +121,7 @@ private:
 };
 
 // ===========================================================================
-ToolPresetDock::ToolPresetDock(GLWidget *gl, ToolConfig *toolCfg, QWidget *parent)
+ToolPresetDock::ToolPresetDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent)
     : QWidget(parent), glWidget(gl), toolCfg_(toolCfg)
 {
     auto *vLayout = new QVBoxLayout(this);
@@ -157,7 +157,7 @@ ToolPresetDock::ToolPresetDock(GLWidget *gl, ToolConfig *toolCfg, QWidget *paren
     connect(addBtn, &QPushButton::clicked, this, &ToolPresetDock::addNew);
 
     currentType_ = glWidget->getActiveTool();
-    activeToolChangedConn_ = connect(glWidget, &GLWidget::activeToolChanged, this, &ToolPresetDock::setCurrentTool);
+    activeToolChangedConn_ = connect(glWidget, &CanvasWidget::activeToolChanged, this, &ToolPresetDock::setCurrentTool);
 
     // 設定変更の見張り(理由はヘッダのコメント)。値の比較だけなので負荷は無視できる。
     previewWatchTimer_ = new QTimer(this);
@@ -173,11 +173,11 @@ void ToolPresetDock::setCurrentTool(ToolType tool)
     rebuildRows();
 }
 
-void ToolPresetDock::setGLWidget(GLWidget *gl)
+void ToolPresetDock::setCanvasWidget(CanvasWidget *gl)
 {
     QObject::disconnect(activeToolChangedConn_);
     glWidget = gl;
-    activeToolChangedConn_ = connect(glWidget, &GLWidget::activeToolChanged, this, &ToolPresetDock::setCurrentTool);
+    activeToolChangedConn_ = connect(glWidget, &CanvasWidget::activeToolChanged, this, &ToolPresetDock::setCurrentTool);
     setCurrentTool(glWidget->getActiveTool());
 }
 

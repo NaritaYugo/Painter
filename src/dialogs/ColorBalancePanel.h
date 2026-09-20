@@ -8,7 +8,7 @@ class QLabel;
 // ColorBalancePanel
 // ---------------------------------------------------------------------------
 // 編集メニュー「カラーバランス」アクション用のポップアップパネル(C/M/Yの3本)。
-// HueSatLightPanelと同様、GLWidgetの子として「キャンバス上に」浮かせて表示する
+// HueSatLightPanelと同様、CanvasWidgetの子として「キャンバス上に」浮かせて表示する
 // 非モーダルのQWidget。
 // ---------------------------------------------------------------------------
 class ColorBalancePanel : public DraggablePanel

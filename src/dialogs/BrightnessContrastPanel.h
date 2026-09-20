@@ -8,7 +8,7 @@ class QLabel;
 // BrightnessContrastPanel
 // ---------------------------------------------------------------------------
 // 編集メニュー「明るさ・コントラスト」アクション用のポップアップパネル。
-// HueSatLightPanelと同様、GLWidgetの子として「キャンバス上に」浮かせて表示する
+// HueSatLightPanelと同様、CanvasWidgetの子として「キャンバス上に」浮かせて表示する
 // 非モーダルのQWidget。
 // ---------------------------------------------------------------------------
 class BrightnessContrastPanel : public DraggablePanel

@@ -2,7 +2,7 @@
 #include "actions/CanvasActionHost.h"
 #include "actions/CanvasActionController.h"
 #include "tools/core/ToolContext.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 
 #include "dialogs/ChromaticAberrationPanel.h"
 
@@ -84,7 +84,7 @@ bool ChromaticAberrationAction::paintOverlay(QPainter &painter, const ToolContex
 bool ChromaticAberrationAction::handleMousePress(QMouseEvent *e, ToolContext &ctx)
 {
     // 円形モードの中心ハンドルにヒットした場合だけ true(=消費)。
-    // 外れた場合は false を返し、GLWidget 側の通常ガード(Move/Rotateのみ通す)へ委ねる。
+    // 外れた場合は false を返し、CanvasWidget 側の通常ガード(Move/Rotateのみ通す)へ委ねる。
     host_.hostMakeCurrent();
     return tool_.onMousePress(e, ctx);
 }

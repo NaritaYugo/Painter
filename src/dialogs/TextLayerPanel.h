@@ -1,6 +1,6 @@
 #pragma once
 #include "dialogs/DraggablePanel.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 
 class QPlainTextEdit;
 class QFontComboBox;
@@ -12,7 +12,7 @@ class QCheckBox;
 // TextLayerPanel
 // ---------------------------------------------------------------------------
 // TextToolでテキストレイヤーをクリックしたときに出る、文字入力用のポップアップ
-// パネル。BrightnessContrastPanel/HueSatLightPanelと同様、GLWidgetの子として
+// パネル。BrightnessContrastPanel/HueSatLightPanelと同様、CanvasWidgetの子として
 // 「キャンバス上に」浮かせて表示する非モーダルのQWidget。
 // ---------------------------------------------------------------------------
 class TextLayerPanel : public DraggablePanel

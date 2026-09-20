@@ -33,9 +33,9 @@ class WarpTool : public Tool, protected QOpenGLFunctions_4_3_Core
 public:
     void initialize(QOpenGLContext *ctx);
 
-    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(GLWidget経由で渡される)
+    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)
     void setToolConfig(ToolConfig *cfg) { toolCfg_ = cfg; }
-    // GLWidget が initializeGL でコンパイルした warp.comp を注入する
+    // CanvasWidget が initializeGL でコンパイルした warp.comp を注入する
     void setProgram(QOpenGLShaderProgram *p) { prog_ = p; }
 
     void onMousePress(QMouseEvent *event, ToolContext &ctx)   override;

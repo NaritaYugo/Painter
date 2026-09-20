@@ -11,7 +11,7 @@
 // paintOverlay を持つ。
 //
 // ライセンスゲート(未認証時に ProFeatureDialog を出す)と、無料版ビルドでの
-// フォールバックは GLWidget::startChromaticAberrationAction() 側に残す
+// フォールバックは CanvasWidget::startChromaticAberrationAction() 側に残す
 // (無料版ビルドではこのアクション自体が登録されない)。
 // ---------------------------------------------------------------------------
 

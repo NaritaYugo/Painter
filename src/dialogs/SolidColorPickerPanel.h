@@ -11,7 +11,7 @@ class ColorWheelWidget;
 // 単色レイヤーの色を編集するポップアップパネル。中身はColorCircleDock(ドック側の
 // カラーサークル)と同じColorWheelWidgetをそのまま使う(OKLCHベースのカラー
 // サークルの実装を二重に持たないため)。BrightnessContrastPanel等と同様、
-// GLWidgetの子として「キャンバス上に」浮かせて表示する非モーダルのQWidget。
+// CanvasWidgetの子として「キャンバス上に」浮かせて表示する非モーダルのQWidget。
 // ---------------------------------------------------------------------------
 class SolidColorPickerPanel : public DraggablePanel
 {

@@ -76,7 +76,7 @@ public:
     CustomShaderAction(CanvasActionHost &h, CanvasActionController &c) : CanvasAction(h, c) {}
     void initialize(QOpenGLContext *ctx) override { tool_.initialize(ctx); }
     // 動的コンパイル済みプログラムはGLコンテキストがあるうちに解放する必要がある
-    // (GLWidgetデストラクタから CanvasActionController::releaseAllGL() 経由で呼ばれる)。
+    // (CanvasWidgetデストラクタから CanvasActionController::releaseAllGL() 経由で呼ばれる)。
     void releaseGL() override { tool_.releaseGL(); }
     void positionPanel() override;
     void applyRenderState(QOpenGLShaderProgram *p) override;

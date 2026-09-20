@@ -1,5 +1,5 @@
 #include "tools/canvas/TextTool.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 
 #include <QMouseEvent>
 #include <QPainter>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "widgets/GLWidget.h"
+#include "canvas/CanvasWidget.h"
 #include "tools/core/ToolConfig.h"
 
 #include <QWidget>
@@ -136,14 +136,14 @@ class ToolPropDock : public QWidget
 {
     Q_OBJECT
 public:
-    explicit ToolPropDock(GLWidget *gl, ToolConfig *toolCfg, QWidget *parent = nullptr);
+    explicit ToolPropDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent = nullptr);
 
     void setCurrentTool(ToolType tool);
     void refreshFromSettings();
     void syncSize(int px);
 
-    // タブ切替時に、表示対象のGLWidget(=キャンバス)を差し替える
-    void setGLWidget(GLWidget *gl);
+    // タブ切替時に、表示対象のCanvasWidget(=キャンバス)を差し替える
+    void setCanvasWidget(CanvasWidget *gl);
 
 signals:
     void sizeChanged();
@@ -196,7 +196,7 @@ private:
     static QSlider *makeSlider(QWidget *parent, int min, int max, int val);
 
     // ---- 状態 --------------------------------------------------------------
-    GLWidget       *glWidget = nullptr;
+    CanvasWidget       *glWidget = nullptr;
     ToolConfig     *toolCfg_ = nullptr;
     QStackedWidget *stack    = nullptr;
     QPushButton    *selectionClearBtn_ = nullptr; // 選択ツールページの「選択を解除」ボタン

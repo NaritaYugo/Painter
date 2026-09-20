@@ -36,11 +36,11 @@ public:
     
     void initialize(QOpenGLContext *ctx);
 
-    // テクスチャ/シェーダーを GLWidget 側から注入
+    // テクスチャ/シェーダーを CanvasWidget 側から注入
     void setTextures(const Textures &tex)   { tex_ = tex; }
     void setPrograms(const Programs &prog)  { prog_ = prog; }
 
-    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(GLWidget経由で渡される)
+    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)
     void setToolConfig(ToolConfig *cfg) { toolCfg_ = cfg; }
 
     void onMousePress(QMouseEvent *event, ToolContext &ctx) override
@@ -48,7 +48,7 @@ public:
         execute(ctx, event->position());
     }
 
-    // GLWidget::executeFill(pos, threshold) のような外部公開APIからも
+    // CanvasWidget::executeFill(pos, threshold) のような外部公開APIからも
     // 同じロジックを呼べるように、実処理を独立したメンバ関数にしてある。
     bool execute(ToolContext &ctx, const QPointF &widgetPos);
 

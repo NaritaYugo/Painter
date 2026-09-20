@@ -28,7 +28,7 @@ std::optional<QCursor> PenEraserTool::cursor(const ToolContext &ctx) const
     return CursorUtils::makeCircleCursor(size * viewScale);
 }
 
-// 現在の筆圧(setPressure済み。GLWidget::mapPressureで筆圧カーブ適用済み)から半径を求める。
+// 現在の筆圧(setPressure済み。CanvasWidget::mapPressureで筆圧カーブ適用済み)から半径を求める。
 // 最小サイズ比率のぶんだけ、筆圧0でも太さを残す(PressureResponse参照)。
 float PenEraserTool::pressureRadius(int size) const
 {
@@ -310,7 +310,7 @@ void PenEraserTool::dispatchBrushState(ToolContext &ctx, int stampCount)
     ctx.computeBrushStateProgram->release();
 
     // イメージユニット0はmaskTexが入っている前提で使われているので戻す
-    // (GLWidget::updateBelowCompositeCacheの同種コメント参照)。
+    // (CanvasWidget::updateBelowCompositeCacheの同種コメント参照)。
     ctx.gl->glBindImageTexture(0, ctx.maskTex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R8);
 }
 
@@ -739,7 +739,7 @@ void PenEraserTool::onMousePress(QMouseEvent *event, ToolContext &ctx)
     // これは常に取りこぼした重複イベントなので無視する。ここを無視しないと、
     // ストローク中にもかかわらずここでctx.beginStrokeUndo()が再度呼ばれてUndo境界が
     // 壊れ、pendingStamps_がクリアされて直前の未フラッシュ分が消え、さらに
-    // (下のGLWidget::mousePressEventが素のマウスと誤認して筆圧を1.0にリセットする
+    // (下のCanvasWidget::mousePressEventが素のマウスと誤認して筆圧を1.0にリセットする
     // ため)フル筆圧の点が現在位置に打たれてしまう(タブレットで書き始め・
     // ストローク中に太い点が混じる不具合の原因)。
     if (isDrawing_) return;
@@ -806,7 +806,7 @@ void PenEraserTool::onMousePress(QMouseEvent *event, ToolContext &ctx)
 
     // フレームレート律速バッチ: ここでは即座にGPUディスパッチせず、スタンプを
     // 貯めておくだけにする(実際のディスパッチはflushPendingInput()で行う。
-    // Tool.h/GLWidget::paintGL()参照)。
+    // Tool.h/CanvasWidget::paintGL()参照)。
     // 進行方向に追従するときだけ、最初の1粒は方向が分かるまで保留する
     // (PenEraserTool.h の pendingFirstStamp_ のコメント参照)。
     pendingFirstStamp_ = !isEraser_ && toolCfg_->pen().followDirection();

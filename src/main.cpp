@@ -1,6 +1,6 @@
-﻿#include "widgets/MainWindow.cpp"
+#include "app/MainWindow.h"
 #include "components/ThemeColors.h"
-#include "backend/ShaderCache.h"
+#include "rendering/ShaderCache.h"
 
 #include <QApplication>
 #include <QFont>
@@ -19,7 +19,7 @@
 #include <memory>
 
 #ifdef TIEPOLO_PRO_BUILD
-#include "backend/LicenseManager.h"
+#include "licensing/LicenseManager.h"
 #endif
 
 // "QWindowsWindow::setGeometry: Unable to set geometry ..." は、ダイアログの
@@ -47,7 +47,7 @@ static void filteredMessageHandler(QtMsgType type, const QMessageLogContext &con
 // 「1フレームが重い」ときに、キャンバス以外のウィジェットが巻き込まれて
 // 描き直されていないかを確かめるためのもの。ビュー変換のカクつきを追ったときは、
 // これでドラッグ中もNavigatorDockと周辺のボタン類が毎秒6回描き直されていることが
-// 分かった(GLWidget::setupToolContext の requestRepaint のコメント参照)。
+// 分かった(CanvasWidget::setupToolContext の requestRepaint のコメント参照)。
 // ===========================================================================
 class PaintTally : public QObject
 {
@@ -220,7 +220,7 @@ int main(int argc, char *argv[])
 {
     qInstallMessageHandler(filteredMessageHandler);
 
-    // タブごとに独立したQOpenGLWidget(GLWidget)を動的に生成・破棄するため、GL
+    // タブごとに独立したQOpenGLWidget(CanvasWidget)を動的に生成・破棄するため、GL
     // コンテキストの共有をウィジェットの生存期間に依存しないグローバルな共有コンテキスト
     // にしておく(Qt公式ドキュメント推奨の設定)。これが無いと、あるQOpenGLWidgetを
     // 破棄した際に暗黙の共有グループごと壊れ、他のタブの描画がクラッシュしうる。

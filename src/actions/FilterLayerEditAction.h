@@ -1,7 +1,7 @@
 #pragma once
 
 #include "actions/CanvasAction.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 
 class GaussianBlurPanel;
 class MotionBlurPanel;
@@ -22,7 +22,7 @@ class LensBlurPanel;
 //
 // 破壊的フィルターのアクション(GaussianBlurAction/ChromaticAberrationAction)と
 // 違い、確定してもピクセルへは一切焼き込まない ―― パラメータを残すだけで、効果は
-// 表示のたびに GLWidget::rebuildFilterChain() がかけ直す。キャンセルは編集開始
+// 表示のたびに CanvasWidget::rebuildFilterChain() がかけ直す。キャンセルは編集開始
 // 時点のパラメータへ戻すだけ(レイヤー自体は消さない)。
 //
 // AdjustmentLayerEditAction(種類ごとに bcPanel_/hslPanel_ を使い分ける)と同じ
@@ -45,7 +45,7 @@ class LensBlurPanel;
 // このクラス自体は無料版・Pro版どちらでも常に登録される(GaussianBlur/MotionBlur/
 // Mosaic/Noiseは無料版機能のため)。ChromaticAberration/LensBlur関連のメンバ・
 // 処理だけを #ifdef TIEPOLO_PRO_BUILD で囲み、それらのライセンス確認は呼び出し側
-// (GLWidget::editFilterLayer)がアクション開始前に行う。
+// (CanvasWidget::editFilterLayer)がアクション開始前に行う。
 // ---------------------------------------------------------------------------
 class FilterLayerEditAction : public CanvasAction
 {

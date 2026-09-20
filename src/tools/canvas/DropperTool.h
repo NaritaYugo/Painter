@@ -19,7 +19,7 @@
 class DropperTool : public Tool
 {
 public:
-    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(GLWidget経由で渡される)
+    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)
     void setToolConfig(ToolConfig *cfg) { toolCfg_ = cfg; }
 
     void onMousePress(QMouseEvent *event, ToolContext &ctx) override
@@ -50,7 +50,7 @@ public:
     // ドラッグ中にキャンバスの見た目が変わる要素は何も無い(色を読むだけで、
     // プレビューはカーソル画像側に出る)ので、定期的な再描画は不要。
     // これを止めないと、ドラッグ中ずっと全レイヤーの再合成(部分再描画も効かない)が
-    // 走り続け、重いだけでなくGLWidget側の適応間隔(最大100ms)が伸びてしまう。
+    // 走り続け、重いだけでなくCanvasWidget側の適応間隔(最大100ms)が伸びてしまう。
     bool needsCanvasRepaintWhileActive() const override { return false; }
 
     std::optional<QCursor> cursor(const ToolContext &ctx) const override

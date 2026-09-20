@@ -436,7 +436,7 @@ bool FillTool::execute(ToolContext &ctx, const QPointF &widgetPos)
     // 合成モード・スタンプごとの色はペン専用の設定なので、ここでは明示的に既定へ戻す
     prog_.bake->setUniformValue("uBrushBlendMode", 0);
     prog_.bake->setUniformValue("uUseStrokeColor", 0);
-    // uDispatchOriginはAirbrushToolが最後にこのプログラム(GLWidgetと共有している
+    // uDispatchOriginはAirbrushToolが最後にこのプログラム(CanvasWidgetと共有している
     // computeBakeProgram)を使った際の非ゼロ値が残っていることがあるため、
     // キャンバス全域を対象とするここでは明示的に(0,0)へ戻す
     // (PenEraserTool.cppの同種の修正と同じ理由)。
@@ -471,7 +471,7 @@ bool FillTool::execute(ToolContext &ctx, const QPointF &widgetPos)
 
     // マスクをクリア
     prog_.maskClear->bind();
-    // uDispatchOriginはAirbrushToolが最後にこのプログラム(GLWidgetと共有している
+    // uDispatchOriginはAirbrushToolが最後にこのプログラム(CanvasWidgetと共有している
     // computeMaskClearProgram)を使った際の非ゼロ値が残っていることがあるため、
     // キャンバス全域を対象とするここでは明示的に(0,0)へ戻す
     // (PenEraserTool.cppの同種の修正と同じ理由)。

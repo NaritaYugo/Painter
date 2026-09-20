@@ -28,7 +28,7 @@ public:
     void initialize(QOpenGLContext *ctx);
     void setToolConfig(ToolConfig *cfg) { toolCfg_ = cfg; }
 
-    // アクション開始(GLWidget::startFreeTransformAction)時に呼ばれ、
+    // アクション開始(CanvasWidget::startFreeTransformAction)時に呼ばれ、
     // 選択範囲(あれば)/レイヤー全体(無ければ)から初期の4頂点を算出する。
     void activate(ToolContext &ctx);
     // アクションをキャンセルして終了する(GPU側は未変更なので状態を捨てるだけでよい)。
@@ -48,7 +48,7 @@ public:
     // 4頂点一律の平行移動として扱う。
     void nudge(const QVector2D &delta) { if (engaged_) for (auto &c : corners_) c += delta; }
 
-    // render.frag用のゲッター(GLWidget::paintGLから呼ぶ)
+    // render.frag用のゲッター(CanvasWidget::paintGLから呼ぶ)
     bool      engaged()  const { return engaged_; }
     QVector2D corner(int i) const { return corners_[i]; } // 0=TL,1=TR,2=BR,3=BL
     QVector2D center0()  const { return c0_; }

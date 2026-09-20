@@ -6,19 +6,19 @@
 // ---------------------------------------------------------------------------
 // PenEraserTool
 // ---------------------------------------------------------------------------
-// 旧 GLWidget::mousePressEvent/mouseMoveEvent/mouseReleaseEvent のうち、
+// 旧 CanvasWidget::mousePressEvent/mouseMoveEvent/mouseReleaseEvent のうち、
 // 「ペンで描く/消しゴムで消す」ロジックだけを取り出したもの。
 // Pen0/Pen1/Pen2/Eraser はすべてこのクラスのインスタンスで、
 // コンストラクタに渡す BrushSettings* と isEraser フラグだけが異なる。
 //
-// GLWidget 側の責務は「どのインスタンスが activeTool か」を切り替えることだけになる。
+// CanvasWidget 側の責務は「どのインスタンスが activeTool か」を切り替えることだけになる。
 // ---------------------------------------------------------------------------
 class PenEraserTool : public Tool
 {
 public:
-    // settings: このツールが使うブラシ設定への参照(GLWidgetが所有する penSettings[i] or eraserSettings)
+    // settings: このツールが使うブラシ設定への参照(CanvasWidgetが所有する penSettings[i] or eraserSettings)
     // isEraser: 消しゴムとして振る舞うか(baker への色渡しが透明になる)
-    // toolCfg: MainWindowが所有する唯一のToolConfigへの非所有ポインタ(GLWidget経由で渡される)
+    // toolCfg: MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)
     PenEraserTool(bool isEraser, float *smoothingStrength, ToolConfig *toolCfg)
         : isEraser_(isEraser), smoothingStrength_(smoothingStrength), toolCfg_(toolCfg) {}
 
@@ -28,7 +28,7 @@ public:
     bool isActive() const override { return isDrawing_; }
     std::optional<QCursor> cursor(const ToolContext &ctx) const override;
     // フレームレート律速バッチ(Tool.h参照)。onMousePress/onMouseMoveが貯めた
-    // pendingStamps_をここでまとめて1回のdispatchにする。GLWidget::paintGL()が
+    // pendingStamps_をここでまとめて1回のdispatchにする。CanvasWidget::paintGL()が
     // 毎フレーム呼ぶ。
     void flushPendingInput(ToolContext &ctx) override;
     bool hasPendingInput() const override { return !pendingStamps_.isEmpty(); }
@@ -72,7 +72,7 @@ private:
     // フレームレート律速バッチ用に貯めておく未処理スタンプ(位置+その時点の半径。
     // 筆圧でスタンプごとに半径が変わりうるため、半径もスタンプ単位で持つ)。
     // onMousePress/onMouseMoveはここへ積むだけで即座にはGPUディスパッチしない。
-    // 実際のディスパッチはflushPendingInput()(GLWidget::paintGL()が毎フレーム
+    // 実際のディスパッチはflushPendingInput()(CanvasWidget::paintGL()が毎フレーム
     // 呼ぶ)で1回にまとめて行う。ペンタブの高頻度サンプルでもGPU処理回数を
     // 表示フレーム数まで抑えられる(位置・筆圧そのものはonMouseMove()側で
     // 実イベントごとに正しい順序で処理されるため、精度は落ちない)。

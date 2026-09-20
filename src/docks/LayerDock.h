@@ -3,7 +3,7 @@
 #include <QWidget>
 #include <QVector>
 
-class GLWidget;
+class CanvasWidget;
 class QScrollArea;
 class QVBoxLayout;
 class QHBoxLayout;
@@ -34,19 +34,19 @@ class LayerDock : public QWidget
 {
     Q_OBJECT
 public:
-    explicit LayerDock(GLWidget *gl, QWidget *parent = nullptr);
+    explicit LayerDock(CanvasWidget *gl, QWidget *parent = nullptr);
 
     // 外部（MainWindowなど）から画面をリフレッシュするための関数
     void refresh();
 
-    // GLWidget::layersChanged()から呼ぶ想定。ストローク確定の連打や不透明度
+    // CanvasWidget::layersChanged()から呼ぶ想定。ストローク確定の連打や不透明度
     // スライダーのドラッグなど、短時間に連続発火しうる場面で毎回refresh()
     // (フルキャンバス合成を伴いうる重い処理)を直接実行すると重くなるため、
     // 一定時間まとめてから最後の1回だけrefresh()を呼ぶ(デバウンス)。
     void scheduleRefresh();
 
-    // タブ切替時に、表示対象のGLWidget(=キャンバス)を差し替える
-    void setGLWidget(GLWidget *gl);
+    // タブ切替時に、表示対象のCanvasWidget(=キャンバス)を差し替える
+    void setCanvasWidget(CanvasWidget *gl);
 
     // MainWindowのレイヤーメニューからも呼べるよう公開している、ツールバーの
     // 各ボタンと同じ操作(実体はprivateのメンバ関数と同じシグネチャ)。
@@ -71,7 +71,7 @@ public:
     QSize sizeHint() const override { return QSize(BASE_WIDTH, BASE_HEIGHT); }
 
 private:
-    GLWidget *glWidget = nullptr;
+    CanvasWidget *glWidget = nullptr;
 
     // ---- 上部コントロール(選択中レイヤーのブレンドモード/不透明度・マスク) ----
     QComboBox *blendCombo    = nullptr;

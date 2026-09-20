@@ -183,7 +183,7 @@ private:
     static float linearToGamma(float c);
     // カラーモード(CMYK擬似/グレースケール)+モニターキャリブレーションによる
     // 見た目だけの変換。render.fragの最終合成結果に対する変換と同じ式・同じ順序
-    // (カラーモード→明るさ・コントラスト→CMY)を使う(GLWidget.cpp/render.frag参照)。
+    // (カラーモード→明るさ・コントラスト→CMY)を使う(CanvasWidget.cpp/render.frag参照)。
     QRgb applyDisplayPreview(QRgb rgb) const;
     // OKLCH → QRgb (クランプ込み)
     static QRgb  oklchToQRgb(float L, float C, float hue_deg);

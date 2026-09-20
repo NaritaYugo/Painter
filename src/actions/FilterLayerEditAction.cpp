@@ -227,7 +227,7 @@ bool FilterLayerEditAction::onActivate()
 #endif
 
     // 未知の種類(将来追加される可能性)、またはPro限定の種類を無料版ビルドで
-    // 開こうとした場合。呼び出し側(GLWidget::editFilterLayer)が事前に弾いている
+    // 開こうとした場合。呼び出し側(CanvasWidget::editFilterLayer)が事前に弾いている
     // はずなので、ここに来るのは想定外のケースだけ。
     return false;
 }

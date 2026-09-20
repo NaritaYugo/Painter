@@ -60,7 +60,7 @@ QRgb ColorWheelWidget::oklchToQRgb(float L, float C, float hue_deg)
 }
 
 // カラーモード+モニターキャリブレーションによる見た目だけの変換。
-// render.fragの最終合成結果に対する変換(GLWidget.cpp paintGL/render.frag)と
+// render.fragの最終合成結果に対する変換(CanvasWidget.cpp paintGL/render.frag)と
 // 同じ式・同じ適用順序(カラーモード→明るさ・コントラスト→CMY)を使い、
 // キャンバスの見え方とカラーサークルの見え方を一致させる。実際に選ばれる色
 // (pickColor/color()の戻り値)はこの関数を通さないため、塗る色そのものには
@@ -88,7 +88,7 @@ QRgb ColorWheelWidget::applyDisplayPreview(QRgb rgb) const
         b = qBound(0.0f, 1.0f - absorbedB, 1.0f);
     }
 
-    // モニターキャリブレーション(GLWidget.cpp paintGLと同じ換算式、
+    // モニターキャリブレーション(CanvasWidget.cpp paintGLと同じ換算式、
     // common.glslのadjustBrightnessContrast/adjustColorBalanceと同じ計算)。
     const float calBrightness = m_calBrightness / 200.0f;
     const float calContrast   = 1.0f + m_calContrast / 100.0f;

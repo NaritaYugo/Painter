@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 // 色調整/フィルター/変形/キャンバスサイズ/レイヤー編集など、「メニューやショートカット
 // から開始し、専用パネルやキャンバス上のハンドルで操作して、確定/キャンセルで終わる」
-// 一回限りのアクションの抽象基底。以前は GLWidget に startXxx/confirmXxx/cancelXxx/
+// 一回限りのアクションの抽象基底。以前は CanvasWidget に startXxx/confirmXxx/cancelXxx/
 // positionXxxPanel として直書きされ、相互排他・描画uniform・マウス入力ブロックが
 // あちこちに散らばっていたものを、この基底 + CanvasActionController に集約する。
 //
@@ -49,7 +49,7 @@ public:
     // ---- 結合点フック(既定は何もしない) --------------------------------
     // GL 初期化時に一度だけ呼ばれる(所有するツールの initialize 用)。
     virtual void initialize(QOpenGLContext * /*ctx*/) {}
-    // GLWidget デストラクタから、GLコンテキストがまだ有効なうちに一度だけ呼ばれる。
+    // CanvasWidget デストラクタから、GLコンテキストがまだ有効なうちに一度だけ呼ばれる。
     // 動的コンパイル済みシェーダー等、tool 側で明示的な解放が必要な場合に使う
     // (CustomShaderTool::releaseGL 等。ほとんどのアクションは何もしなくてよい)。
     virtual void releaseGL() {}
@@ -72,11 +72,11 @@ public:
     virtual void applyRenderState(QOpenGLShaderProgram * /*renderProg*/) {}
     // GL 描画後の QPainter オーバーレイ(変形枠・ハンドル等)。実際に描いたら true を返す。
     // 変形/キャンバスサイズ/色収差ハンドルのみ描画し、色調整/フィルターパネル系は
-    // 何も描かない(false を返し、GLWidget 側で通常ツールのオーバーレイを描かせる)。
+    // 何も描かない(false を返し、CanvasWidget 側で通常ツールのオーバーレイを描かせる)。
     virtual bool paintOverlay(QPainter & /*painter*/, const ToolContext & /*ctx*/) { return false; }
 
     // ---- マウス横取り(変形/キャンバスサイズ/色収差ハンドル用) -----------
-    // 消費したら true を返す(その場合 GLWidget は通常のツール処理へ進まない)。
+    // 消費したら true を返す(その場合 CanvasWidget は通常のツール処理へ進まない)。
     virtual bool handleMousePress      (QMouseEvent * /*e*/, ToolContext & /*ctx*/) { return false; }
     virtual bool handleMouseMove       (QMouseEvent * /*e*/, ToolContext & /*ctx*/) { return false; }
     virtual bool handleMouseRelease    (QMouseEvent * /*e*/, ToolContext & /*ctx*/) { return false; }
@@ -91,7 +91,7 @@ public:
     virtual bool mapSelectionOutlinePoint(QPointF & /*canvasPx*/) const { return false; }
 
     // Shift+WASD 等のキーボードによる平行移動(変形/自由変形アクションのみ対応)。
-    // 対応していない/対応していても何もしなかった場合は false を返し、GLWidget 側の
+    // 対応していない/対応していても何もしなかった場合は false を返し、CanvasWidget 側の
     // 通常のレイヤー内容ナッジ(nudgeActiveLayer)へフォールスルーさせる。
     virtual bool nudge(const QVector2D & /*delta*/) { return false; }
 

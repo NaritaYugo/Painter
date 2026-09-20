@@ -21,7 +21,7 @@
 // transform.compで実際にlayerTexArray/selectionMaskTexへ焼き込み、アクションを終える。
 //
 // マウスイベントの委譲を再利用するためTool派生のままにしてあるが、
-// GLWidgetはToolType経由ではなく、変形アクション実行中かどうかのフラグで
+// CanvasWidgetはToolType経由ではなく、変形アクション実行中かどうかのフラグで
 // 直接このインスタンスへイベントを回す(ToolRegistry/ToolConfigには登録しない)。
 // ---------------------------------------------------------------------------
 class TransformTool : public Tool, protected QOpenGLFunctions_4_3_Core
@@ -30,7 +30,7 @@ public:
     void initialize(QOpenGLContext *ctx);
     void setToolConfig(ToolConfig *cfg) { toolCfg_ = cfg; }
 
-    // アクション開始(GLWidget::startTransformAction)時に呼ばれ、
+    // アクション開始(CanvasWidget::startTransformAction)時に呼ばれ、
     // 選択範囲(あれば)/レイヤー全体(無ければ)からbboxを算出する。
     void activate(ToolContext &ctx);
     // アクションをキャンセルして終了する(GPU側は未変更なので状態を捨てるだけでよい)。
@@ -50,7 +50,7 @@ public:
     // pivot_の平行移動として扱う。
     void nudge(const QVector2D &delta) { if (engaged_) pivot_ += delta; }
 
-    // render.frag用に現在の変換パラメータを渡すためのゲッター(GLWidget::paintGLから呼ぶ)
+    // render.frag用に現在の変換パラメータを渡すためのゲッター(CanvasWidget::paintGLから呼ぶ)
     bool      engaged()  const { return engaged_; }
     QVector2D pivot()    const { return pivot_; }
     QVector2D scale()    const { return scale_; }

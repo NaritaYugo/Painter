@@ -60,11 +60,11 @@ public:
     // これ*直径から求める(距離ベースのスタンプ方式)。
     void setSpacing(float s) { spacing_ = qBound(0.05f, s, 3.0f); }
     // 先端(スタンプ)画像。リソースパス(:/...)またはファイルシステム上のパス。
-    // 実際のGLテクスチャの読み込み/差し替えはGLWidget::setPenTipImage()が行う
+    // 実際のGLテクスチャの読み込み/差し替えはCanvasWidget::setPenTipImage()が行う
     // (このクラスはパス文字列を保持・永続化するだけ)。
     void setTipImagePath(const QString &p) { tipImagePath_ = p; }
     // このツール(プリセット)専用の筆圧カーブ。環境設定の「全体の筆圧カーブ」を
-    // 通した後に適用される(PressureCurve/GLWidget::mapPressure参照)。
+    // 通した後に適用される(PressureCurve/CanvasWidget::mapPressure参照)。
     void setPressureCurve(const PressureCurve &c) { pressureCurve_ = c; }
     // 筆圧0のときに残すサイズ/不透明度の比率(PressureResponse参照)。0で従来どおり。
     void setMinSizeRatio(float r)    { minSizeRatio_ = qBound(0.f, r, 1.f); }
@@ -105,7 +105,7 @@ public:
     // ---- ブラシの合成モード ------------------------------------------------
     // ストロークをレイヤーへ焼き込むときの合成方法(レイヤーの合成モードと同じ一覧)。
     // 値は BlendMode の整数値そのままで、0(普通)が既定。
-    // 型をintにしているのは、ToolConfigがbackend/CanvasDocument.hに依存しないため。
+    // 型をintにしているのは、ToolConfigがdocument/CanvasDocument.hに依存しないため。
     void setBrushBlendMode(int m) { brushBlendMode_ = qBound(0, m, 26); }
 
     // ---- 後補正 ------------------------------------------------------------
@@ -376,9 +376,9 @@ public:
     void setHardness(float h) { hardness_ = qBound(0.f, h, 1.f); }
     // スタンプ間隔。ブラシ直径に対する比率(PenToolConfig::spacingと同じ考え方)。
     void setSpacing(float s) { spacing_ = qBound(0.05f, s, 3.0f); }
-    // 手振れ補正の強さ(GLWidget::smoothingStrengthと同じ意味の値。1.0で補正なし、
+    // 手振れ補正の強さ(CanvasWidget::smoothingStrengthと同じ意味の値。1.0で補正なし、
     // 小さいほどペン先の動きに対して描画位置の追従が遅れる=強く補正される)。
-    // ペン/消しゴムはGLWidget共有の1つの値を使うが、エアブラシはツールプリセットごとに
+    // ペン/消しゴムはCanvasWidget共有の1つの値を使うが、エアブラシはツールプリセットごとに
     // 独立した値を持たせる(ツール設定項目として明示的に要求されたため)。
     void setSmoothing(float s) { smoothing_ = qBound(0.01f, s, 1.0f); }
     void setPressureCurve(const PressureCurve &c) { pressureCurve_ = c; } // 以下4つ PenToolConfigと同じ
@@ -685,7 +685,7 @@ inline EraseBrush eraseBrushFor(bool isEraserTool, const ColorConfig &color, flo
 }
 
 // 表示上の見た目だけを変えるカラーモード(実データは常にRGBAのまま)。
-// render.fragの最終合成結果に対して掛ける(GLWidget::paintGL()がuColorModeとして送る)。
+// render.fragの最終合成結果に対して掛ける(CanvasWidget::paintGL()がuColorModeとして送る)。
 // グレースケールは2種類:
 //   GrayscaleLuminance: 輝度ベース(Y = 0.299R+0.587G+0.114B、人間の知覚に近い)
 //   GrayscaleLightness: 明度ベース(HSLのL = (max+min)/2。「色相・彩度・明度」調整
@@ -705,7 +705,7 @@ private:
 // モニターキャリブレーション。カラーモード変換後の最終出力に対して常に
 // 適用される「表示調整」(実データ/カラーモードとは無関係、モニター環境の
 // クセを補正するためのもの)。値域はBrightnessContrastTool/ColorBalanceTool
-// と同じ-100〜100の整数(GLWidget::paintGL()でfloatへ変換してuniformへ送る)。
+// と同じ-100〜100の整数(CanvasWidget::paintGL()でfloatへ変換してuniformへ送る)。
 class CalibrationConfig
 {
 public:

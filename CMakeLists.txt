@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 有料版(Pro)ビルドかどうか。OFF(既定)なら無料版で、Pro専用コードは
 # #ifdef TIEPOLO_PRO_BUILD で囲まれた部分ごとバイナリに一切含まれない。
 # Pro版としてビルドするには -DTIEPOLO_PRO_BUILD=ON を付けてcmakeを実行する。
-# 詳細: src/backend/LicenseManager.h / tools/license/ を参照。
+# 詳細: src/licensing/LicenseManager.h / tools/license/ を参照。
 option(TIEPOLO_PRO_BUILD "Build the Pro (paid) edition with pro-only features enabled" OFF)
 
 set(CMAKE_AUTOMOC ON)
@@ -30,22 +30,39 @@ qt_add_resources(APP_RESOURCES
 
 set(APP_SOURCES
 src/main.cpp
+    src/README.md
 
-    src/widgets/GLWidget.h
-    src/widgets/GLWidget.cpp
-    src/widgets/MainWindow.h
-    src/widgets/MainWindowShortcuts.cpp
-    src/widgets/MainWindowNative.cpp
-    src/widgets/NativeWindowLog.h
-    src/widgets/NativeWindowLog.cpp
-    src/widgets/StartPage.h
-    src/widgets/StartPage.cpp
-    src/widgets/CanvasPane.h
-    src/widgets/CanvasPane.cpp
-    src/widgets/CanvasTabPage.h
-    src/widgets/CanvasTabPage.cpp
-    src/widgets/CanvasTabBar.h
-    src/widgets/CanvasTabBar.cpp
+    # Application shell and canvas integration hubs
+    src/canvas/CanvasWidget.h
+    src/canvas/CanvasWidget.cpp
+    src/canvas/CanvasWidgetSelection.cpp
+    src/canvas/CanvasWidgetActions.cpp
+    src/canvas/CanvasWidgetRendering.cpp
+    src/canvas/CanvasWidgetInput.cpp
+    src/canvas/CanvasWidgetLayers.cpp
+    src/canvas/CanvasWidgetUndo.cpp
+    src/canvas/CanvasWidgetCompositing.cpp
+    src/canvas/CanvasWidgetGeometry.cpp
+    src/app/MainWindow.h
+    src/app/MainWindowHelpers.h
+    src/app/MainWindow.cpp
+    src/app/MainWindowWorkspace.cpp
+    src/app/MainWindowChrome.cpp
+    src/app/MainWindowFiles.cpp
+    src/app/MainWindowSettings.cpp
+    src/app/MainWindowEvents.cpp
+    src/app/MainWindowShortcuts.cpp
+    src/app/MainWindowNative.cpp
+    src/app/NativeWindowLog.h
+    src/app/NativeWindowLog.cpp
+    src/app/StartPage.h
+    src/app/StartPage.cpp
+    src/canvas/CanvasPane.h
+    src/canvas/CanvasPane.cpp
+    src/canvas/CanvasTabPage.h
+    src/canvas/CanvasTabPage.cpp
+    src/canvas/CanvasTabBar.h
+    src/canvas/CanvasTabBar.cpp
 
     # キーボードショートカット/コマンド登録の基盤(ツールそのものではなく、
     # メニュー・ショートカットキーの割り当て・保存/読込を担う)
@@ -55,6 +72,7 @@ src/main.cpp
 
     src/docks/LayerDock.h
     src/docks/LayerDock.cpp
+    src/docks/layers/LayerDockWidgets.h
     src/docks/ColorCircleDock.h
     src/docks/ColorCircleDock.cpp
     src/docks/ToolDock.h
@@ -110,6 +128,8 @@ src/main.cpp
 
     src/components/DockTitleBar.h
     src/components/DockTitleBar.cpp
+    src/components/DockResizeController.h
+    src/components/DockResizeController.cpp
     src/components/ThemeColors.h
     src/components/MultiColumnDelegate.h
     src/components/ColorWheelWidget.h
@@ -121,31 +141,34 @@ src/main.cpp
     src/components/ToolPreview.h
     src/components/ToolPreview.cpp
 
-    src/backend/CanvasDocument.h
-    src/backend/CanvasDocument.cpp
-    src/backend/CanvasSerializer.h
-    src/backend/CanvasSerializer.cpp
-    src/backend/RecentFiles.h
-    src/backend/RecentFiles.cpp
-    src/backend/PsdCodec.h
-    src/backend/PsdCodec.cpp
-    src/backend/PsdDescriptor.h
-    src/backend/PsdDescriptor.cpp
-    src/backend/ShaderCache.h
-    src/backend/ShaderCache.cpp
-    src/backend/AbrCodec.h
-    src/backend/AbrCodec.cpp
-    src/backend/AbrPenMapping.h
-    src/backend/AbrPenMapping.cpp
-    src/backend/ViewTransform.h
-    src/backend/StrokeUndoRecorder.h
-    src/backend/StrokeUndoRecorder.cpp
-    src/backend/CanvasCompositor.h
-    src/backend/CanvasCompositor.cpp
-    src/backend/LayerSliceAllocator.h
+    # Document model and project-level state
+    src/document/CanvasDocument.h
+    src/document/CanvasDocument.cpp
+    src/document/CanvasSerializer.h
+    src/document/CanvasSerializer.cpp
+    src/document/RecentFiles.h
+    src/document/RecentFiles.cpp
+    # External file formats
+    src/io/PsdCodec.h
+    src/io/PsdCodec.cpp
+    src/io/PsdDescriptor.h
+    src/io/PsdDescriptor.cpp
+    # Shared GPU/rendering infrastructure
+    src/rendering/ShaderCache.h
+    src/rendering/ShaderCache.cpp
+    src/io/AbrCodec.h
+    src/io/AbrCodec.cpp
+    src/io/AbrPenMapping.h
+    src/io/AbrPenMapping.cpp
+    src/rendering/ViewTransform.h
+    src/document/StrokeUndoRecorder.h
+    src/document/StrokeUndoRecorder.cpp
+    src/rendering/CanvasCompositor.h
+    src/rendering/CanvasCompositor.cpp
+    src/rendering/LayerSliceAllocator.h
 
     # キャンバスアクション基盤(色調整/フィルター/変形/レイヤー編集などの一回限りの
-    # アクションを、GLWidget から切り出した CanvasAction 階層 + コントローラ)
+    # アクションを、CanvasWidget から切り出した CanvasAction 階層 + コントローラ)
     src/actions/CanvasActionHost.h
     src/actions/CanvasAction.h
     src/actions/CanvasAction.cpp
@@ -247,9 +270,9 @@ src/main.cpp
 # 無料版ビルドにはこれらのファイル自体が一切コンパイル・リンクされない。
 if(TIEPOLO_PRO_BUILD)
     list(APPEND APP_SOURCES
-        src/backend/LicenseManager.h
-        src/backend/LicenseManager.cpp
-        src/backend/LicensePublicKey.h
+        src/licensing/LicenseManager.h
+        src/licensing/LicenseManager.cpp
+        src/licensing/LicensePublicKey.h
 
         # 色収差フィルター(Pro限定機能第1号)
         src/tools/actions/ChromaticAberrationTool.h

@@ -1,6 +1,6 @@
 #include "actions/TransformActions.h"
 #include "actions/CanvasActionHost.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 
 #include <QOpenGLShaderProgram>
 #include <QtMath>

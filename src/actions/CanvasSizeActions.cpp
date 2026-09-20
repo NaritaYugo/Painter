@@ -1,7 +1,7 @@
 #include "actions/CanvasSizeActions.h"
 #include "actions/CanvasActionHost.h"
 #include "actions/CanvasActionController.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 #include "dialogs/CanvasSizePanel.h"
 #include "dialogs/ImageResolutionPanel.h"
 

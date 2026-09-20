@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tools/core/Tool.h"
-#include "widgets/NativeWindowLog.h"
+#include "app/NativeWindowLog.h"
 
 #include <QElapsedTimer>
 #include <QtMath>
@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 // MoveTool
 // ---------------------------------------------------------------------------
-// 旧 GLWidget::mousePressEvent/mouseMoveEvent の ToolType::Move 分岐を移したもの。
+// 旧 CanvasWidget::mousePressEvent/mouseMoveEvent の ToolType::Move 分岐を移したもの。
 // ViewTransform::pan() を呼ぶだけの薄いツール。
 // ---------------------------------------------------------------------------
 class MoveTool : public Tool

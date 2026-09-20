@@ -58,7 +58,7 @@ static void clearGrid(QGridLayout *grid)
 }
 
 // ===========================================================================
-ToolDock::ToolDock(GLWidget *gl, const ShortcutRegistry &shortcuts, QWidget *parent)
+ToolDock::ToolDock(CanvasWidget *gl, const ShortcutRegistry &shortcuts, QWidget *parent)
     : QWidget(parent), glWidget(gl), shortcuts_(shortcuts)
 {
     // ボタン1個分 + 左右マージンを最小幅に設定

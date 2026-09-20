@@ -8,7 +8,7 @@
 #include <QImage>
 #include "tools/core/ToolType.h"
 
-class GLWidget;
+class CanvasWidget;
 class ToolConfig;
 class QVBoxLayout;
 class QTimer;
@@ -30,20 +30,20 @@ class ToolPresetDock : public QWidget
 {
     Q_OBJECT
 public:
-    explicit ToolPresetDock(GLWidget *gl, ToolConfig *toolCfg, QWidget *parent = nullptr);
+    explicit ToolPresetDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent = nullptr);
 
     // 外部から一覧を作り直したいとき用(設定の読み込み直後など)
     void refresh();
 
-    // タブ切替時に、表示対象のGLWidget(=キャンバス)を差し替える
-    void setGLWidget(GLWidget *gl);
+    // タブ切替時に、表示対象のCanvasWidget(=キャンバス)を差し替える
+    void setCanvasWidget(CanvasWidget *gl);
 
 public slots:
-    // 現在表示中のツール種別を切り替える(GLWidget::activeToolChangedに接続)
+    // 現在表示中のツール種別を切り替える(CanvasWidget::activeToolChangedに接続)
     void setCurrentTool(ToolType tool);
 
 private:
-    GLWidget   *glWidget = nullptr;
+    CanvasWidget   *glWidget = nullptr;
     ToolConfig *toolCfg_ = nullptr;
     ToolType    currentType_ = ToolType::Pen;
     QMetaObject::Connection activeToolChangedConn_;

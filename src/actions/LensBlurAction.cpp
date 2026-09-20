@@ -2,7 +2,7 @@
 #include "actions/CanvasActionHost.h"
 #include "actions/CanvasActionController.h"
 #include "tools/core/ToolContext.h"
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 
 #include "dialogs/LensBlurPanel.h"
 

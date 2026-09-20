@@ -17,10 +17,10 @@ class QPainter;
 // キャンセルはレイヤー本体に一切触れないので常に安全)。
 //
 // 円形モードの中心は、CanvasSizeToolの矩形ハンドルと同様にキャンバス上へ直接
-// 描画したハンドルをドラッグして指定する(数値入力欄は持たない)。GLWidget側は
+// 描画したハンドルをドラッグして指定する(数値入力欄は持たない)。CanvasWidget側は
 // canvasSizeActionActive_と同じ扱いで、chromaticAberrationActionActive_中は
 // onMousePress()がハンドルにヒットした場合だけ処理を横取りする(ヒットしなければ
-// false を返し、GLWidget側は通常のツール排他ガード(Move/Rotateのみ通す)に委ねる)。
+// false を返し、CanvasWidget側は通常のツール排他ガード(Move/Rotateのみ通す)に委ねる)。
 // ---------------------------------------------------------------------------
 class ChromaticAberrationTool : protected QOpenGLFunctions_4_3_Core
 {

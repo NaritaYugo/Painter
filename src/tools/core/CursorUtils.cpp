@@ -58,7 +58,7 @@ QCursor makeCircleCursor(float diameterPx)
     int d = qBound(kMinDiameter, qRound(diameterPx), kMaxDiameter);
 
     // 直径が同じなら結果は毎回完全に同じなので、直径をキーにキャッシュする。
-    // この関数はGLWidget::updateCursor()経由でマウス移動イベントのたびに呼ばれるが、
+    // この関数はCanvasWidget::updateCursor()経由でマウス移動イベントのたびに呼ばれるが、
     // カーソル画像の生成(数千ピクセルのプロット+QImage確保+ネイティブカーソル
     // オブジェクト生成)はブラシサイズに比例して重い。特にペンタブは、マウスと違い
     // OSが移動イベントを間引かないため生のサンプル頻度(200Hz以上)でここへ到達し、
@@ -92,7 +92,7 @@ QCursor makeCircleCursor(float diameterPx)
 
 QCursor makeIconCursor(const QString &iconPath, int size, bool hotspotAtBottomLeft)
 {
-    // makeCircleCursor()と同じ理由でキャッシュする。この関数もGLWidget::updateCursor()
+    // makeCircleCursor()と同じ理由でキャッシュする。この関数もCanvasWidget::updateCursor()
     // 経由で移動イベントのたびに呼ばれるが、中身は画像ファイルのデコード+平滑化
     // スケーリング+ネイティブカーソル生成で、1回あたりのコストは無視できない。
     static QHash<QString, QCursor> cache;
@@ -115,9 +115,9 @@ QCursor makeIconCursor(const QString &iconPath, int size, bool hotspotAtBottomLe
 
 QCursor makeIconWithSwatchCursor(const QString &iconPath, QColor color, int iconSize)
 {
-    // 【重要】色ごとにキャッシュする。GLWidget::applyCursor()は「前回と同じ見た目か」を
+    // 【重要】色ごとにキャッシュする。CanvasWidget::applyCursor()は「前回と同じ見た目か」を
     // QPixmap::cacheKeyで判定して、変わったときだけsetCursor()+カーソル再描画
-    // (内部でQCursor::setPos()を伴う。GLWidget::applyCursorの長いコメント参照)を行う。
+    // (内部でQCursor::setPos()を伴う。CanvasWidget::applyCursorの長いコメント参照)を行う。
     // 毎回新しいQPixmapを作って返すとcacheKeyが毎回変わり、同じ色の上をなぞっている
     // 間じゅう不要なsetPos()を撃ち続けることになる。
     static QHash<QString, QCursor> cache;

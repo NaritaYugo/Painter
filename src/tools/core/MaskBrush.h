@@ -19,7 +19,7 @@
 // この値は2箇所で使われ、両者が一致していないとプレビューと確定結果がずれる:
 //   ・焼き込み側 : PenEraserTool::onMouseRelease / AirbrushTool::stampAndBake が
 //                  bake.comp の uBrushColor へ渡す
-//   ・プレビュー側: GLWidget::paintGL が render.frag の uMaskBrushColor へ渡し、
+//   ・プレビュー側: CanvasWidget::paintGL が render.frag の uMaskBrushColor へ渡し、
 //                  シェーダー側が bake.comp と同じ式でマスク値を先に反映して描く
 // そのため定義はここ1箇所だけに置く。
 // ---------------------------------------------------------------------------

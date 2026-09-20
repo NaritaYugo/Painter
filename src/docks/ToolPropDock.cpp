@@ -1,7 +1,7 @@
 #include "docks/ToolPropDock.h"
 #include "components/CollapsibleSection.h"
 #include "components/ThemeColors.h"
-#include "backend/BlendModeList.h"
+#include "document/BlendModeList.h"
 #include "components/ImagePresetPicker.h"
 #include "dialogs/ToneCurveEditor.h"
 #include "tools/core/BrushTipPresets.h"
@@ -231,7 +231,7 @@ static void setBrushSpacing(ToolConfig &c, ToolType t, float s)
     else                         c.pen().setSpacing(s);
 }
 
-// 筆圧カーブを持つのは、実際に筆圧で半径が変わるツールだけ(GLWidget::mapPressure)。
+// 筆圧カーブを持つのは、実際に筆圧で半径が変わるツールだけ(CanvasWidget::mapPressure)。
 static const PressureCurve &toolPressureCurve(ToolConfig &c, ToolType t)
 {
     switch (t) {
@@ -394,7 +394,7 @@ static QString sectionSettingsKey(ToolType tool, const QString &sectionId)
 // ===========================================================================
 // コンストラクタ
 // ===========================================================================
-ToolPropDock::ToolPropDock(GLWidget *gl, ToolConfig *toolCfg, QWidget *parent)
+ToolPropDock::ToolPropDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent)
     : QWidget(parent), glWidget(gl), toolCfg_(toolCfg)
 {
     auto *vLayout = new QVBoxLayout(this);
@@ -442,13 +442,13 @@ void ToolPropDock::refreshFromSettings()
         fn();
 }
 
-void ToolPropDock::setGLWidget(GLWidget *gl)
+void ToolPropDock::setCanvasWidget(CanvasWidget *gl)
 {
     QObject::disconnect(selectionChangedConn_);
     glWidget = gl;
     if (selectionClearBtn_) {
         selectionClearBtn_->setEnabled(glWidget->hasSelection());
-        selectionChangedConn_ = connect(glWidget, &GLWidget::selectionChanged, this, [this](bool has) {
+        selectionChangedConn_ = connect(glWidget, &CanvasWidget::selectionChanged, this, [this](bool has) {
             selectionClearBtn_->setEnabled(has);
         });
     }
@@ -832,7 +832,7 @@ void ToolPropDock::buildSetting(SettingId id, ToolType tool, QWidget *page, QVBo
     // ---- 手振れ補正 ----
     // 内部値は「1.0で補正なし、小さいほど強く補正」だが、UIは直感に合わせて
     // 「0%で補正なし、大きいほど強く補正」と反転させて出す。
-    // エアブラシだけはGLWidget共有の値ではなく、ツールプリセットごとに独立した
+    // エアブラシだけはCanvasWidget共有の値ではなく、ツールプリセットごとに独立した
     // 値(AirbrushToolConfig::smoothing)を持つ。
     case SettingId::Smoothing: {
         const bool perPreset = (tool == ToolType::Airbrush);
@@ -870,7 +870,7 @@ void ToolPropDock::buildSetting(SettingId id, ToolType tool, QWidget *page, QVBo
 
     // ---- 筆圧カーブ(このツール専用) ----
     // 横軸=入ってきた筆圧、縦軸=実際に使う筆圧。環境設定の「全体の筆圧カーブ」を
-    // 通した後にこれが掛かる(GLWidget::mapPressure)。
+    // 通した後にこれが掛かる(CanvasWidget::mapPressure)。
     // 編集ウィジェットはトーンカーブと同じ ToneCurveEditor を流用している。
     case SettingId::PressureCurveEdit: {
         auto *editor = new ToneCurveEditor(page);
@@ -1231,7 +1231,7 @@ void ToolPropDock::buildSetting(SettingId id, ToolType tool, QWidget *page, QVBo
         connect(selectionClearBtn_, &QPushButton::clicked, this, [this]() {
             glWidget->clearSelection();
         });
-        selectionChangedConn_ = connect(glWidget, &GLWidget::selectionChanged, this, [this](bool has) {
+        selectionChangedConn_ = connect(glWidget, &CanvasWidget::selectionChanged, this, [this](bool has) {
             selectionClearBtn_->setEnabled(has);
         });
         break;

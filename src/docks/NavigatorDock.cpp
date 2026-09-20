@@ -1,5 +1,5 @@
 #include "docks/NavigatorDock.h"
-#include "widgets/GLWidget.h"
+#include "canvas/CanvasWidget.h"
 #include "components/ThemeColors.h"
 
 #include <QVBoxLayout>
@@ -23,7 +23,7 @@ constexpr int kFlipButtonH = 22;
 // ===========================================================================
 // NavigatorDock
 // ===========================================================================
-NavigatorDock::NavigatorDock(GLWidget *gl, QWidget *parent)
+NavigatorDock::NavigatorDock(CanvasWidget *gl, QWidget *parent)
     : QWidget(parent), glWidget(gl)
 {
     setMinimumSize(100, 160);
@@ -72,7 +72,7 @@ NavigatorDock::NavigatorDock(GLWidget *gl, QWidget *parent)
 
     QHBoxLayout *bottomLayout = new QHBoxLayout();
 
-    // キャンバス表示倍率スライダー(10%-800%、絶対値でGLWidgetの表示倍率を変更する)
+    // キャンバス表示倍率スライダー(10%-800%、絶対値でCanvasWidgetの表示倍率を変更する)
     zoomSlider = new QSlider(Qt::Horizontal, this);
     zoomSlider->setRange(10, 800);
     zoomSlider->setValue(qRound(glWidget->viewScale() * 100.0f));
@@ -116,9 +116,9 @@ NavigatorDock::NavigatorDock(GLWidget *gl, QWidget *parent)
         glWidget->setFlippedX(checked);
     });
 
-    // GLWidget側でパン・ズーム・回転・反転が変わったら、表示範囲枠とスライダー値を
+    // CanvasWidget側でパン・ズーム・回転・反転が変わったら、表示範囲枠とスライダー値を
     // 追従させる(プレビュー画像自体は変わらないのでupdatePreview()は呼ばない)。
-    viewChangedConn_ = connect(glWidget, &GLWidget::viewChanged, this, [this]() {
+    viewChangedConn_ = connect(glWidget, &CanvasWidget::viewChanged, this, [this]() {
         const QSignalBlocker blocker(zoomSlider);
         zoomSlider->setValue(qBound(zoomSlider->minimum(),
                                      qRound(glWidget->viewScale() * 100.0f),
@@ -129,11 +129,11 @@ NavigatorDock::NavigatorDock(GLWidget *gl, QWidget *parent)
     applyButtonStyles();
 }
 
-void NavigatorDock::setGLWidget(GLWidget *gl)
+void NavigatorDock::setCanvasWidget(CanvasWidget *gl)
 {
     QObject::disconnect(viewChangedConn_);
     glWidget = gl;
-    viewChangedConn_ = connect(glWidget, &GLWidget::viewChanged, this, [this]() {
+    viewChangedConn_ = connect(glWidget, &CanvasWidget::viewChanged, this, [this]() {
         const QSignalBlocker blocker(zoomSlider);
         zoomSlider->setValue(qBound(zoomSlider->minimum(),
                                      qRound(glWidget->viewScale() * 100.0f),
@@ -212,7 +212,7 @@ QRect NavigatorDock::previewDstRect() const
 
 void NavigatorDock::updatePreview()
 {
-    // タブが1枚も無い間(ダミーのdeckGLWidget_を指している間)はGLコンテキストが
+    // タブが1枚も無い間(ダミーのdeckCanvasWidget_を指している間)はGLコンテキストが
     // 一度も初期化されていないため、makeCurrent()を伴うgetNavigatorPreview()を
     // 呼ぶとクラッシュする。キャンバスサイズも0のままなので、その場合は空表示にする。
     if (!glWidget->isGLReady()) {
@@ -314,7 +314,7 @@ void NavigatorDock::paintEvent(QPaintEvent *event)
     p.setBrush(Qt::NoBrush);
     p.drawRect(dst);
 
-    // 現在GLWidgetに表示されている範囲を示す枠(パン・ズーム・回転・左右反転を
+    // 現在CanvasWidgetに表示されている範囲を示す枠(パン・ズーム・回転・左右反転を
     // すべて反映)。プレビュー画像自体はcanvasWidth()xcanvasHeight()に対応するので、
     // キャンバスピクセル座標をそのままdstの比率でプレビュー内座標へ写像するだけでよい。
     const int cw = glWidget->canvasWidth(), ch = glWidget->canvasHeight();

@@ -10,8 +10,8 @@
 // 色調整系アクション(色相・彩度・明度 / 明るさ・コントラスト / カラーバランス /
 // トーンカーブ)。いずれも「専用パネルの値を受け取り、対応する Tool の uniform を
 // 更新して render.frag でライブプレビュー、確定でタイルへ焼き込む」構造。
-// 以前は GLWidget に startXxx/confirmXxx/cancelXxx/positionXxxPanel として直書き
-// されていた(GLWidget.cpp の各アクション)。
+// 以前は CanvasWidget に startXxx/confirmXxx/cancelXxx/positionXxxPanel として直書き
+// されていた(CanvasWidget.cpp の各アクション)。
 // ---------------------------------------------------------------------------
 
 class HueSatLightPanel;

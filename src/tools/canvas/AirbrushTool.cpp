@@ -39,7 +39,7 @@ static QColor toPreMulColor(const QColor &rawColor, float opacity)
 }
 
 // ===========================================================================
-// 現在の筆圧(setPressure済み。GLWidget::mapPressureで筆圧カーブ適用済み)から半径を求める。
+// 現在の筆圧(setPressure済み。CanvasWidget::mapPressureで筆圧カーブ適用済み)から半径を求める。
 float AirbrushTool::pressureRadius(int size) const
 {
     return (float)size / 2.0f
@@ -167,9 +167,9 @@ void AirbrushTool::stampAndBake(ToolContext &ctx, const QVector2D &pos, float ra
             ctx.gl->glBlitFramebuffer(srcX, srcY, srcX + w, srcY + h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         }, maskMode);
     // 【注意】ctx.defaultFbo()は0固定。この関数はflushPendingInput()経由で
-    // GLWidget::paintGL()の中からも呼ばれるため、ここで0に外したままだとその
+    // CanvasWidget::paintGL()の中からも呼ばれるため、ここで0に外したままだとその
     // フレームの描画がフレームバッファ0へ行って捨てられる。paintGL()側が
-    // 入り口でバインドを控えて戻している(GLWidget::paintGL()のprevDrawFbo参照)。
+    // 入り口でバインドを控えて戻している(CanvasWidget::paintGL()のprevDrawFbo参照)。
     ctx.gl->glBindFramebuffer(GL_FRAMEBUFFER, ctx.defaultFbo());
     ctx.gl->glDeleteFramebuffers(1, &srcFbo);
     ctx.gl->glDeleteFramebuffers(1, &dstFbo);
@@ -214,7 +214,7 @@ void AirbrushTool::onMousePress(QMouseEvent *event, ToolContext &ctx)
     const float stampAlpha = pressureStampAlpha();
 
     // フレームレート律速バッチ: 即座にstampAndBake()を呼ばず貯めておくだけにする
-    // (実際の処理はflushPendingInput()、GLWidgetの定期タイマーが呼ぶ)。
+    // (実際の処理はflushPendingInput()、CanvasWidgetの定期タイマーが呼ぶ)。
     pendingStamps_.append({ drawHead_, radius, stampAlpha });
 
     ctx.requestRepaint();

@@ -11,7 +11,7 @@
 // CanvasSizePanel(実際のQWidget: 9箇所のアンカー選択 + 幅/高さの数値入力)からも
 // setAnchorAndSize() 経由で操作できる。どちらの操作も同じ矩形状態
 // (x0_,y0_,w_,h_ : 旧キャンバス座標系での提案矩形)を更新する。
-// 実データへの書き込みは無く、確定(confirm)時に GLWidget::resizeCanvasKeepingContent
+// 実データへの書き込みは無く、確定(confirm)時に CanvasWidget::resizeCanvasKeepingContent
 // を1回呼ぶだけ(ピクセル位置の移動を伴うため、Transform系のようなプレビュー用シェーダーは
 // 使わず、QPainterでの矩形オーバーレイのみでプレビューする)。
 // ---------------------------------------------------------------------------

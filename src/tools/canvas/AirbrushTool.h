@@ -21,7 +21,7 @@
 class AirbrushTool : public Tool
 {
 public:
-    // toolCfg: MainWindowが所有する唯一のToolConfigへの非所有ポインタ(GLWidget経由で渡される)
+    // toolCfg: MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)
     explicit AirbrushTool(ToolConfig *toolCfg) : toolCfg_(toolCfg) {}
 
     void onMousePress(QMouseEvent *event, ToolContext &ctx)   override;
@@ -47,7 +47,7 @@ private:
 
     // フレームレート律速バッチ用に貯めておく未処理スタンプ(位置+その時点の半径)。
     // onMousePress/onMouseMoveはここへ積むだけで、即座にはstampAndBake()を呼ばない
-    // (実際の処理はflushPendingInput()、GLWidgetの定期タイマーが呼ぶ)。
+    // (実際の処理はflushPendingInput()、CanvasWidgetの定期タイマーが呼ぶ)。
     // 1スタンプごとに即座に焼き込むという挙動自体(同じ場所に止めると際限なく
     // 濃くなる)は変えず、呼ぶタイミングだけをペンタブの生サンプル頻度から
     // 一定間隔(60Hz目安)へ間引く。

@@ -2,7 +2,7 @@
 
 #include <QWidget>
 #include <QAbstractButton>
-#include "widgets/GLWidget.h"
+#include "canvas/CanvasWidget.h"
 
 class QButtonGroup;
 class QGridLayout;
@@ -16,15 +16,15 @@ class ToolDock : public QWidget
 {
     Q_OBJECT
 public:
-    explicit ToolDock(GLWidget *gl, const ShortcutRegistry &shortcuts, QWidget *parent = nullptr);
+    explicit ToolDock(CanvasWidget *gl, const ShortcutRegistry &shortcuts, QWidget *parent = nullptr);
     void syncButton(ToolType tool);
 
     // ショートカットキー設定が変更された際に、ツールチップの表示(例:「ペン(Q)」)を
     // 最新のキー割り当てに合わせて更新する。
     void refreshTooltips();
 
-    // タブ切替時に、表示対象のGLWidget(=キャンバス)を差し替える
-    void setGLWidget(GLWidget *gl) { glWidget = gl; syncButton(glWidget->getActiveTool()); }
+    // タブ切替時に、表示対象のCanvasWidget(=キャンバス)を差し替える
+    void setCanvasWidget(CanvasWidget *gl) { glWidget = gl; syncButton(glWidget->getActiveTool()); }
     
     static constexpr int BTN_SIZE    = 30; // ボタン1辺のピクセル数
     static constexpr int BTN_SPACING = 4;  // グリッドスペーシング
@@ -40,7 +40,7 @@ private:
     // グリッドを cols 列で組み直す
     void reflowGrids(int cols);
 
-    GLWidget                *glWidget  = nullptr;
+    CanvasWidget                *glWidget  = nullptr;
     const ShortcutRegistry  &shortcuts_;
     QButtonGroup            *buttonGroup = nullptr;
 

@@ -379,15 +379,24 @@ QToolBar::handle:vertical {
     margin: 0px 8px;
 }
 
-/* QMainWindowのセパレータ（QDockWidgetなどの境界線やリサイズハンドル） */
+/* ドック外周は描かない。リサイズ用の当たり判定はDockResizeControllerが
+   レイアウトを消費しない透明な領域として境界の両側に重ねる。 */
+QDockWidget {
+    border: none;
+    margin: 0px;
+    padding: 0px;
+}
+
 QMainWindow::separator {
-    background: @bgBase@;
-    width: 4px;  /* 縦の境界線の太さ */
-    height: 4px; /* 横の境界線の太さ */
+    background: transparent;
+    width: 0px;
+    height: 0px;
+    margin: 0px;
+    padding: 0px;
 }
 
 QMainWindow::separator:hover {
-    background: @textDisabled@; /* ホバー時に少し明るくして、掴めることをアピール */
+    background: transparent;
 }
 
 /* ==========================================================================
@@ -546,10 +555,62 @@ QScrollBar::right-arrow:horizontal {
     background: transparent;
 }
 
-/* 分割表示(複数キャンバスペイン)のアクティブペイン枠。ペインが1枚だけの通常時は
-   active プロパティが立たないため何も描かれず、既存の見た目のままになる。 */
-CanvasPane[active="true"] {
-    border: 2px solid @accent@;
+/* ==========================================================================
+   キャンバスワークスペース
+
+   QStackedWidgetはQFrame派生なので、上の汎用QFrameルールを放置すると
+   ワークスペース・タブページの両方へ1px枠と角丸が付く。QTabWidgetの標準pane枠と
+   合わせてキャンバスが数pxずつ狭くなるため、キャンバス階層だけ完全にフラットにする。
+   ========================================================================== */
+QStackedWidget#canvasWorkspace,
+QStackedWidget#canvasTabPage,
+QWidget#canvasPane,
+QOpenGLWidget#canvasView {
+    background-color: @bgBase@;
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+}
+
+QTabWidget#canvasTabs {
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+QTabWidget#canvasTabs::pane {
+    background-color: @bgBase@;
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+}
+
+QTabBar#canvasTabBar {
+    background-color: @bgBase@;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+QTabBar#canvasTabBar::tab {
+    background-color: @bgBase@;
+    color: @text@;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    margin: 0;
+    padding: 5px 12px 4px 12px;
+}
+
+QTabBar#canvasTabBar::tab:hover {
+    background-color: @hoverBg@;
+}
+
+QTabBar#canvasTabBar::tab:selected {
+    background-color: @bgPanel@;
+    border-bottom-color: @accent@;
 }
 
 /* ==========================================================================

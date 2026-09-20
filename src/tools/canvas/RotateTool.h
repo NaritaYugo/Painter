@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 // RotateTool
 // ---------------------------------------------------------------------------
-// 旧 GLWidget::mousePressEvent/mouseMoveEvent の ToolType::Rotate 分岐を移したもの。
+// 旧 CanvasWidget::mousePressEvent/mouseMoveEvent の ToolType::Rotate 分岐を移したもの。
 // ウィジェット中心を基準に、マウス角度の差分だけ ViewTransform::rotate() を呼ぶ。
 // ---------------------------------------------------------------------------
 class RotateTool : public Tool

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "widgets/GLWidget.h" // ToolType
+#include "canvas/CanvasWidget.h" // ToolType
 
 #include <QString>
 

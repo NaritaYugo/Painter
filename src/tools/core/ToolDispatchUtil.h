@@ -1,6 +1,6 @@
 #pragma once
 
-#include "backend/CanvasDocument.h"
+#include "document/CanvasDocument.h"
 #include <functional>
 
 // ---------------------------------------------------------------------------

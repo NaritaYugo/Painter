@@ -20,7 +20,7 @@
 //      … 使っているタブレットの硬さの癖をここで一度ならす
 //   2. ツール設定の「ツールごとの筆圧カーブ」(PenToolConfig::pressureCurve 等)
 //      … そのうえでツール/プリセットごとの効き方を作る
-// 実際の合成は GLWidget::mapPressure() が行う。
+// 実際の合成は CanvasWidget::mapPressure() が行う。
 //
 // 評価は256段のLUT+線形補間。制御点のスプライン評価をイベントごとに行うと
 // (ペンタブは200Hz前後で届く)毎回 computeTangents() の確保が走るため、

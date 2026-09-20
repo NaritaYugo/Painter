@@ -8,7 +8,7 @@ class QLabel;
 // GaussianBlurPanel
 // ---------------------------------------------------------------------------
 // フィルターメニュー「ガウスぼかし」アクション用のポップアップパネル(半径スライダー1本)。
-// ColorBalancePanel/HueSatLightPanelと同様、GLWidgetの子として「キャンバス上に」
+// ColorBalancePanel/HueSatLightPanelと同様、CanvasWidgetの子として「キャンバス上に」
 // 浮かせて表示する非モーダルのQWidget。
 // ---------------------------------------------------------------------------
 class GaussianBlurPanel : public DraggablePanel
