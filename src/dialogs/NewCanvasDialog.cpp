@@ -1,5 +1,5 @@
-#include "dialogs/NewCanvasDlg.h"
-#include "dialogs/SettingsDlg.h"
+#include "dialogs/NewCanvasDialog.h"
+#include "dialogs/SettingsDialog.h"
 #include "components/MultiColumnDelegate.h"
 
 #include <QVBoxLayout>
@@ -329,7 +329,7 @@ private:
 // ===========================================================================
 // コンストラクタ
 // ===========================================================================
-NewCanvasDlg::NewCanvasDlg(QWidget *parent)
+NewCanvasDialog::NewCanvasDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle("新規作成");
@@ -698,7 +698,7 @@ NewCanvasDlg::NewCanvasDlg(QWidget *parent)
     // ===========================================================================
     // 初期値の設定(設定ダイアログの「新規キャンバス幅/高さ」を初期値として使う)
     // ===========================================================================
-    const SettingsDlg::Values prefs = SettingsDlg::loadValues();
+    const SettingsDialog::Values prefs = SettingsDialog::loadValues();
     m_isUpdating = true;
     m_pxWSpin->setValue(prefs.defaultCanvasW);
     m_pxHSpin->setValue(prefs.defaultCanvasH);
@@ -719,7 +719,7 @@ NewCanvasDlg::NewCanvasDlg(QWidget *parent)
     // showEvent()で(初回表示後に一度だけ)行う。
 }
 
-void NewCanvasDlg::showEvent(QShowEvent *event)
+void NewCanvasDialog::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
     if (m_centeredOnce) return;
@@ -736,7 +736,7 @@ void NewCanvasDlg::showEvent(QShowEvent *event)
 // ヘルパーメソッド群
 // ===========================================================================
 
-void NewCanvasDlg::recalculate(EditSource trigger)
+void NewCanvasDialog::recalculate(EditSource trigger)
 {
     // (recalculateの中身はそのままです)
     if (m_isUpdating) return;
@@ -770,7 +770,7 @@ void NewCanvasDlg::recalculate(EditSource trigger)
     }
 }
 
-void NewCanvasDlg::updatePrintComboBox(const QString& unit) {
+void NewCanvasDialog::updatePrintComboBox(const QString& unit) {
     bool wasUpdating = m_isUpdating;
     m_isUpdating = true;
 
@@ -810,39 +810,39 @@ void NewCanvasDlg::updatePrintComboBox(const QString& unit) {
     m_isUpdating = wasUpdating;
 }
 
-double NewCanvasDlg::getInches(double value, const QString& unit) {
+double NewCanvasDialog::getInches(double value, const QString& unit) {
     if (unit == "mm") return value / 25.4;
     if (unit == "cm") return value / 2.54;
     return value;
 }
 
-double NewCanvasDlg::fromInches(double inches, const QString& unit) {
+double NewCanvasDialog::fromInches(double inches, const QString& unit) {
     if (unit == "mm") return inches * 25.4;
     if (unit == "cm") return inches * 2.54;
     return inches;
 }
 
-double NewCanvasDlg::convertUnit(double value, const QString& from, const QString& to) {
+double NewCanvasDialog::convertUnit(double value, const QString& from, const QString& to) {
     if (from == to) return value;
     return fromInches(getInches(value, from), to);
 }
 
-int NewCanvasDlg::canvasWidth() const
+int NewCanvasDialog::canvasWidth() const
 {
     return m_pxWSpin->value();
 }
 
-int NewCanvasDlg::canvasHeight() const
+int NewCanvasDialog::canvasHeight() const
 {
     return m_pxHSpin->value();
 }
 
-bool NewCanvasDlg::wrapX() const
+bool NewCanvasDialog::wrapX() const
 {
     return m_wrapXToggle->isChecked();
 }
 
-bool NewCanvasDlg::wrapY() const
+bool NewCanvasDialog::wrapY() const
 {
     return m_wrapYToggle->isChecked();
 }

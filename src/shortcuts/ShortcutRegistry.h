@@ -16,7 +16,7 @@
 // 新しいショートカットを増やしたい場合は、MainWindow::registerShortcuts() に
 // registerTool()/registerCommand() を1行足すだけでよい
 // (デフォルトキー・設定の保存/読み込み・ダイアログへの表示・重複チェックが
-//  自動的についてくるので、MainWindow本体やShortcutsDlgを個別に触る必要はない)。
+//  自動的についてくるので、MainWindow本体やShortcutsDialogを個別に触る必要はない)。
 //
 // setKey() は即座に反映される: コマンドなら対応するQActionのshortcutをその場で
 // 更新するため、設定ダイアログでOKを押した瞬間から有効になる

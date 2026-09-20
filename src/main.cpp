@@ -37,18 +37,6 @@ static void filteredMessageHandler(QtMsgType type, const QMessageLogContext &con
     if (type == QtFatalMsg) abort();
 }
 
-// ===========================================================================
-// 【計測用】どのウィジェットが再描画されているかを数える
-// ---------------------------------------------------------------------------
-// TIEPOLO_PAINTLOG=1 のときだけ有効(未設定ならフィルタ自体を入れないので
-// コストは無い)。1秒ごとに、その間に来た QEvent::Paint をクラス名別に集計して
-// 1行出す。
-//
-// 「1フレームが重い」ときに、キャンバス以外のウィジェットが巻き込まれて
-// 描き直されていないかを確かめるためのもの。ビュー変換のカクつきを追ったときは、
-// これでドラッグ中もNavigatorDockと周辺のボタン類が毎秒6回描き直されていることが
-// 分かった(CanvasWidget::setupToolContext の requestRepaint のコメント参照)。
-// ===========================================================================
 class PaintTally : public QObject
 {
 public:
@@ -79,19 +67,12 @@ private:
     QHash<QString, int> counts_;
 };
 
-// ---------------------------------------------------------------------------
-// 起動スプラッシュの絵を作る
-// ---------------------------------------------------------------------------
-// 実測(プロセス起動→ウィンドウが実際に表示される)で約1.5秒あり、その間画面には
-// 何も出ない。何を待たされているのか分からないので、その間だけ小さなパネルを出す。
-// 画像ファイルは持たず、テーマの色でその場で描く(テーマを切り替えても追従する)。
+// 起動スプラッシュ
 static QPixmap makeSplashPixmap(qreal dpr, const QString &message)
 {
     const int w = 300, h = 108;
     QPixmap pm(qRound(w * dpr), qRound(h * dpr));
     pm.setDevicePixelRatio(dpr);
-    // 不透明で描く。角丸+半透明(WA_TranslucentBackground)も試したが、
-    // QSplashScreenでは何も表示されなくなったので四角にしてある。
     pm.fill(Theme::bgPanel);
 
     QPainter p(&pm);
@@ -133,12 +114,6 @@ static QPixmap makeSplashPixmap(qreal dpr, const QString &message)
 }
 
 // 起動中に出す小さなウィンドウ。
-//
-// QSplashScreen を使うと、この環境では最後まで画面に出てこなかった
-// (ウィンドウ自体はEnumWindowsで見えるがWS_VISIBLEが立つのが構築完了後。
-//  半透明をやめる/最前面を明示する/show()直後にrepaint()+processEvents()する/
-//  構築をsingleShot(0)で後回しにする、のどれでも変わらず)。
-// 素のQWidgetなら普通に出るので、自前で持つ。
 class SplashWindow : public QWidget
 {
 public:
@@ -174,19 +149,10 @@ private:
     QPixmap pm_;
 };
 
-// 起動が終わるまで利用者の入力を捨てるフィルタ。
-//
-// 事前コンパイル中はUIスレッド自体は動いているが、ドライバがGPUを占有するため
-// 画面への反映が大きく遅れる(実測: この間のクリックが画面に出るまで3.9秒。
-// 終わった後は45ms前後)。操作を受け付けてしまうと「押したのに何も起きない」
-// 状態になり、二重に押されてしまうので、準備が終わるまで入力自体を止める。
-//
-// 止めるのはポインタ・キー・ホイールだけ。
-//
-// ただし Alt+F4 だけは通す。Windowsではこれを DefWindowProc が
-// WM_SYSCOMMAND(SC_CLOSE) へ変換して初めてWM_CLOSEになるので、ここでキーイベントを
-// 捨ててしまうと変換自体が起きず、起動が終わるまでアプリを閉じられなくなる
-// (実測で確認)。待たされている間に閉じられないのは困るので例外にする。
+// 起動が終わるまで利用者の入力を捨てるフィルタ
+
+// Alt+F4 だけは通す
+// このキーイベントを捨てると起動が終わるまでアプリを閉じられなくなる
 class StartupInputBlocker : public QObject
 {
 public:
@@ -220,33 +186,18 @@ int main(int argc, char *argv[])
 {
     qInstallMessageHandler(filteredMessageHandler);
 
-    // タブごとに独立したQOpenGLWidget(CanvasWidget)を動的に生成・破棄するため、GL
-    // コンテキストの共有をウィジェットの生存期間に依存しないグローバルな共有コンテキスト
-    // にしておく(Qt公式ドキュメント推奨の設定)。これが無いと、あるQOpenGLWidgetを
-    // 破棄した際に暗黙の共有グループごと壊れ、他のタブの描画がクラッシュしうる。
+    // タブごとに独立したQOpenGLWidget(CanvasWidget)を動的に生成・破棄するため
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
-    // VSync(スワップ同期)を無効化する。有効(既定=1)だと、描画のたびにバッファ表示が
-    // 垂直帰線を待って最大1フレーム(~16ms)ブロックする。ストローク中は入力ハンドラの
-    // 中から同期描画(repaint)を呼んでペン先へ追従させているため、このブロックがそのまま
-    // 「描くたびに16ms入力が止まる」=線が超スロー・カクつく原因になっていた。0にすると
-    // 待たずに即表示され、ペンストロークが滑らかに追従する(多少のティアリングは
-    // 描画中のみで実害はほぼ無い)。
+    // VSyncを無効化する
+    // 有効だと、ストローク中の線の追従が遅れる
     {
         QSurfaceFormat fmt = QSurfaceFormat::defaultFormat();
         fmt.setSwapInterval(0);
 
-        // 【試して駄目だったこと】setSwapBehavior(TripleBuffer) を試したが、
-        // ビュー変換中の1フレームは 22.5〜25.3ms → 21.6〜22.9ms で、実行ごとの
-        // ばらつきに埋もれる程度しか変わらなかった(この環境のWGLドライバは
-        // バッファ枚数の要求を見ていないと思われる。2026-08-12に実測して撤回)。
-
-        // 【試して駄目だったこと】この環境で実際に確保されるGLの面は alpha=8 rgb=8/8/8。
-        // 「描かれなかった画素がアルファ0=透明として残る」症状の元を断とうとして
-        // setAlphaBufferSize(0)を試したが、ドライバはアルファを外す代わりに
-        // RGB10A2(alpha=2 rgb=10/10/10)を選んでくる。RGBのビット数まで8で明示しても
-        // 同じだった。タイルがRGBA8のこのアプリで10bitの面に変わるほうが害が大きいので
-        // 入れていない(2026-08-03に実測して撤回)。
+        // 背景が透明になることがある
+        // setSwapBehaviorは意味なし
+        // setAlphaBufferSize(0)も意味なし
         QSurfaceFormat::setDefaultFormat(fmt);
     }
 
@@ -254,41 +205,34 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName("pwxwx");
     QApplication::setApplicationName("Tiepolo");
 
-    // 【計測用】PaintTally のコメント参照
+    // 計測用
     if (qEnvironmentVariableIsSet("TIEPOLO_PAINTLOG"))
         app.installEventFilter(new PaintTally(&app));
 
-    // MainWindow構築(メニュー生成)より前に、保存済みのテーマ設定を反映しておく。
+    // MainWindow構築より前に、保存済みのテーマ設定を反映しておく
     const auto savedTheme = (Theme::Name)QSettings().value("ui/theme", (int)Theme::Name::Dark).toInt();
     Theme::setTheme(savedTheme);
     Theme::applyToApplication(app);
     app.setWindowIcon(QIcon(":/icons/app/app_icon.png"));
 
-    // 起動中の表示。ここから MainWindow の構築と表示までが実測で約1.5秒あり、
-    // その間まったく何も出ないので、待っていることが分かるように出しておく。
-    // テーマを反映した後(色を使うため)に作ること。
+    // 起動中の表示
     SplashWindow splash(app.primaryScreen() ? app.primaryScreen()->devicePixelRatio() : 1.0);
     splash.show();
 
-    // 準備が終わるまで入力を止める。理由はStartupInputBlockerのコメント。
     StartupInputBlocker inputBlocker;
     app.installEventFilter(&inputBlocker);
 
-    // 【重要】MainWindowの構築は「スプラッシュが実際に画面へ出てから」始める。
+    // MainWindowの構築は「スプラッシュが実際に画面へ出てから」始める
     //
     // Qtのshow()は「表示すると決める」だけで、OSのウィンドウが実際に可視になるのは
     // イベントループがその要求を処理したとき。構築を続けて呼ぶと1.5秒間ループへ
     // 戻らないので、スプラッシュはその間ずっと不可視のまま終わる
-    // (実測: EnumWindowsで見ると WS_VISIBLE が立つのは構築が終わった後だった。
-    //  show()の直後に processEvents()/repaint() を挟んでも、singleShot(0)で
-    //  構築を次の反復へ回しても、どちらも間に合わなかった)。
     //
     // 出たかどうかは QWindow::isExposed() で分かるので、それを短い間隔で見て、
     // 出たら構築を始める。何らかの理由で出ないままでも起動は続けたいので、
     // 上限時間を過ぎたら構わず構築する。
     //
-    // w は exec() を抜けるまで生かす必要があるのでここで持つ(app より後に
-    // 宣言してあるので、破棄は w → app の順になる)。
+    // w は exec() を抜けるまで生かす必要があるのでここで持つ
     std::unique_ptr<MainWindow> w;
     QElapsedTimer splashClock;
     splashClock.start();
@@ -297,35 +241,26 @@ int main(int argc, char *argv[])
     QObject::connect(waitForSplash, &QTimer::timeout, &app, [&, waitForSplash] {
         const QWindow *h = splash.windowHandle();
         const bool onScreen = (h && h->isExposed());
-        if (!onScreen && splashClock.elapsed() < 400) return; // まだ。ただし待ちすぎない
+        if (!onScreen && splashClock.elapsed() < 400) return;
         waitForSplash->stop();
         waitForSplash->deleteLater();
 #ifdef TIEPOLO_PRO_BUILD
-        // %APPDATA%/pwxwx/Tiepolo/license.tiepololicense があれば読み込んで検証する。
-        // 無い/検証失敗時はLicenseManager::instance().isUnlocked()がfalseのままになるだけで、
-        // 起動は継続する(Pro機能が使えない無料版相当の動作になる)。
         LicenseManager::instance().loadDefault();
 #endif
         w = std::make_unique<MainWindow>();
-        // ウィンドウの位置・サイズ(最大化状態を含む)は、MainWindowのコンストラクタ内で
-        // 既に決まっている(保存済み設定があればloadSettings()のrestoreGeometry()、
-        // 無ければresetDockLayout()のshowMaximized())。ここでは単に表示するだけでよい。
+        // ウィンドウの配置はMainWindowのコンストラクタ内で既に決まっている
+        // ここでは単に表示するだけ
         w->show();
 
-        // ウィンドウは出たが、ここからシェーダーの事前コンパイルが数秒走る。その間は
-        // ドライバがGPUを占有していて操作しても画面に出てこないので、起動画面と
-        // 入力の停止はそのまま続ける(閉じるだけはいつでもできる)。
+        // シェーダーの事前コンパイル
         splash.setMessage(QStringLiteral("描画の準備中..."));
         splash.raise();
 
-        // 準備ができたら起動画面を消して操作を受け付ける。
-        // 何かの理由で通知が来なくても操作不能のままにはしないよう、保険で
-        // 30秒後にも同じことをする。
+        // 準備ができたら起動画面を消して操作を受け付ける
         auto *release = new QTimer(w.get());
         release->setSingleShot(true);
         release->setInterval(30000);
-        // 解除済みかは専用のフラグで持つこと。「起動画面が見えているか」で判定すると、
-        // 利用者が起動画面を閉じてしまった場合に解除が走らず、入力が止まったままになる。
+
         auto released = std::make_shared<bool>(false);
         auto finishStartup = [&splash, &inputBlocker, &app, release, released] {
             if (*released) return;
@@ -338,11 +273,10 @@ int main(int argc, char *argv[])
         release->start();
         ShaderCache::setReadyForUseCallback(finishStartup);
 
-        // シェーダーを裏で先に用意しておく(ShaderCache.h の説明を参照)。
+        // シェーダーを裏で先に用意しておく
         QTimer::singleShot(0, w.get(), [] { ShaderCache::startBackgroundWarmUp(); });
 
-        // コマンドライン引数で渡されたファイル(OSの「プログラムから開く」や
-        // ドラッグ&ドロップ、ファイルの関連付け起動を含む)を開く。
+        // コマンドライン引数で渡されたファイルを開く
         const QStringList fileArgs = QCoreApplication::arguments().mid(1);
         if (!fileArgs.isEmpty())
             QTimer::singleShot(0, w.get(), [&w, fileArgs]() { w->openFilesFromArgs(fileArgs); });

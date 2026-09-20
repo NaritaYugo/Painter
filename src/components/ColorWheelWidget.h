@@ -31,7 +31,7 @@
 //   色相ツイスト(s_hueTwist): Hueシフト量(°/ΔL)。上余白(→Yellow)・下余白(→Blue)共通。
 //     以前はウィジェット下部の「D」スライダーで instance ごとに持っていたが、
 //     色そのものではなく「カラーサークルの振る舞い」の設定なので、環境設定
-//     (SettingsDlg「色相ツイスト」)へ移動してアプリ全体で1つの値を共有する。
+//     (SettingsDialog「色相ツイスト」)へ移動してアプリ全体で1つの値を共有する。
 // ===========================================================================
 class ColorWheelWidget : public QWidget
 {
@@ -54,7 +54,7 @@ public:
     void setTransparent(bool on);
 
     // 色相ツイスト(全インスタンス共通)。環境設定の値をMainWindowから流し込む。
-    // 起動時とSettingsDlgのOK直後に呼ばれ、生きている全カラーサークルの
+    // 起動時とSettingsDialogのOK直後に呼ばれ、生きている全カラーサークルの
     // スクエア画像を作り直して表示中のものは新しい色を通知する。
     static float hueTwist() { return s_hueTwist; }
     static void  setHueTwist(float degPerL);

@@ -62,25 +62,7 @@ void CanvasWidget::startFreeTransformAction()
     actions_.start(freeTransformAction_);
 }
 
-// ===========================================================================
 // 色相・彩度・明度(アクション)
-// ---------------------------------------------------------------------------
-// Transform/FreeTransformと違いキャンバス上のドラッグ操作は無く、CanvasWidgetの
-// 子ウィジェットとして浮かせたHueSatLightPanel(実際のQSlider3本)から値を受け取る。
-// パネル自体がクリックを受け取るため、実行中はCanvasWidgetのマウスイベントを
-// (パネル外へのクリックも)すべて無視し、activeToolへの委譲も止める。
-// ===========================================================================
-// ===========================================================================
-// 色調整/フィルター系アクションの登録と入口(フォワーダ)
-// ---------------------------------------------------------------------------
-// 各アクションの中身(ツール activate/confirm、パネル生成・配線、描画 uniform 等)は
-// src/actions/ の CanvasAction サブクラスへ移動した。ここに残るのは:
-//   - registerCanvasActions(): controller へアクションを登録(コンストラクタから)
-//   - cancelNonControllerActions(): まだ CanvasWidget 側に残る変形/キャンバス/レイヤー編集
-//     アクションを cancel する(controller 管理アクションとの相互排他のため)
-//   - startXxxAction(): メニュー/ショートカットの入口。上記で他アクションを畳んでから
-//     controller.start() するだけ。
-// ===========================================================================
 void CanvasWidget::registerCanvasActions()
 {
     hueSatLightAction_        = actions_.add<HueSatLightAction>();
@@ -99,9 +81,8 @@ void CanvasWidget::registerCanvasActions()
     adjustmentLayerEditAction_ = actions_.add<AdjustmentLayerEditAction>();
     solidColorLayerEditAction_ = actions_.add<SolidColorLayerEditAction>();
     textBoxEditAction_         = actions_.add<TextBoxEditAction>();
-    // ガウスぼかしフィルターレイヤーは無料版でも使えるため、FilterLayerEditAction
-    // 自体は常に登録する(色収差はPro限定だが、editFilterLayer側が種類ごとに
-    // ライセンス確認を行うので、アクションの登録可否では分岐しない)。
+    // ガウスぼかしフィルターレイヤーは無料版でも使えるため、FilterLayerEditAction自体は常に登録する(色収差はPro限定だが、editFilterLayer側が種類ごとにライセンス確認を行うので、
+    // アクションの登録可否では分岐しない)。
     filterLayerEditAction_     = actions_.add<FilterLayerEditAction>();
 #ifdef TIEPOLO_PRO_BUILD
     chromaticAberrationAction_ = actions_.add<ChromaticAberrationAction>();
@@ -112,32 +93,18 @@ void CanvasWidget::registerCanvasActions()
 
 void CanvasWidget::cancelNonControllerActions()
 {
-    // 変形/キャンバス/レイヤー編集系を含め、全14アクションが controller 管理下に
-    // 移行したため、相互排他は actions_.start()/cancelActive() だけで完結するように
-    // なった。呼び出し側(startXxxAction群)を変更せずに済むよう、この関数自体は
-    // 呼び出し互換のために残してあるだけの no-op。
+    // 変形/キャンバス/レイヤー編集系を含め、全14アクションが controller 管理下に移行したため、相互排他は actions_.start()/cancelActive() だけで完結するようになった。
 }
 
 void CanvasWidget::startHueSatLightAction()        { cancelNonControllerActions(); actions_.start(hueSatLightAction_); }
 void CanvasWidget::startBrightnessContrastAction() { cancelNonControllerActions(); actions_.start(brightnessContrastAction_); }
 
-// ===========================================================================
 // 調整レイヤー編集(アクション)
-// ---------------------------------------------------------------------------
-// レイヤー自体はLayerDockの「新規調整レイヤー」で先に作成済み(色相・彩度・明度、
-// 全パラメータ0)のものを使う。LayerDockでそのレイヤーのプレビューをダブルクリック
-// すると開始し、パネルの値変更のたびにlayer.adjustmentを更新してその場で下の
-// レイヤーへ非破壊にプレビューする。キャンセル時は編集開始時点のAdjustmentParams
-// へ戻すだけで、テキストレイヤーと同様にレイヤー自体の削除は行わない
-// (何度でも開き直して編集できる)。
-// ===========================================================================
 void CanvasWidget::editAdjustmentLayer(int layerIndex)
 {
     if (!doc_ || layerIndex < 0 || layerIndex >= doc_->layerCount()) return;
 
-    // トーンカーブ・グラデーションマップはPro限定(破壊的な各ツールと同じ扱い。
-    // startToneCurveAction/editFilterLayer参照)。カラーバランス・色相・彩度・明度・
-    // 明るさ・コントラストは無料版でも常に開ける。
+    // トーンカーブ・グラデーションマップはPro限定(破壊的な各ツールと同じ扱い。startToneCurveAction/editFilterLayer参照)。
     const AdjustmentKind editKind = doc_->layers[layerIndex].adjustment.kind;
     if (editKind == AdjustmentKind::ToneCurve || editKind == AdjustmentKind::GradientMap) {
         const QString featureName = (editKind == AdjustmentKind::ToneCurve)
@@ -161,8 +128,7 @@ void CanvasWidget::editFilterLayer(int layerIndex)
 {
     if (!doc_ || layerIndex < 0 || layerIndex >= doc_->layerCount()) return;
 
-    // Pro限定なのは種類ごとに決まる(色収差・レンズぼかし)。ガウスぼかし・移動ぼかしは
-    // 無料版でも常に開ける。ここで種類を見て、Pro限定の種類のときだけライセンス確認する。
+    // Pro限定なのは種類ごとに決まる(色収差・レンズぼかし)。
     const FilterKind editKind = doc_->layers[layerIndex].filter.kind;
     if (editKind == FilterKind::ChromaticAberration || editKind == FilterKind::LensBlur) {
         const QString featureName = (editKind == FilterKind::ChromaticAberration)
@@ -182,34 +148,14 @@ void CanvasWidget::editFilterLayer(int layerIndex)
     actions_.start(filterLayerEditAction_);
 }
 
-// ===========================================================================
 // 単色レイヤー編集(アクション)
-// ---------------------------------------------------------------------------
-// レイヤー自体はLayerDockの「新規単色レイヤー」で先に作成済みのものを使う。
-// LayerDockでそのレイヤーのプレビューをダブルクリックすると開始し、パネル
-// (OKLCHベースのカラーサークル、ColorCircleDockと共通のColorWheelWidgetを使う)の
-// 値変更のたびにlayer.solidColorを更新してその場でプレビューする。キャンセル時は
-// 編集開始時点の色へ戻すだけで、テキスト/調整レイヤーと同様にレイヤー自体の
-// 削除は行わない(何度でも開き直して編集できる)。
-// ===========================================================================
 void CanvasWidget::editSolidColorLayer(int layerIndex)
 {
     solidColorLayerEditAction_->setTarget(layerIndex);
     actions_.start(solidColorLayerEditAction_);
 }
 
-// ===========================================================================
 // テキストレイヤー編集(アクション)
-// ---------------------------------------------------------------------------
-// レイヤー自体はLayerDockの「新規テキストレイヤー」で先に作成済み(空のテキスト
-// レイヤー)のものを使う。1レイヤーは複数のテキストボックス(layer.textBoxes)を
-// 持てる。TextToolで新規ボックスをtextBoxesへ追加/既存ボックスを選択した後、
-// これを呼んで編集パネルを開く。TextLayerPanelの値変更のたびに対象ボックスを
-// 更新してrasterizeTextLayer()で実タイルへ焼き込む(=キャンバス上にリアル
-// タイムでプレビューされる)。キャンセル時は編集開始時点のTextParamsへ戻す。
-// 確定/キャンセルいずれでも、結果として文字列が空になったボックスは
-// textBoxesから削除する(空ボックスを残さない)。
-// ===========================================================================
 void CanvasWidget::startOrEditTextBox(int boxIndex)
 {
     if (!doc_ || doc_->layers.isEmpty()) return;
@@ -218,11 +164,7 @@ void CanvasWidget::startOrEditTextBox(int boxIndex)
     actions_.start(textBoxEditAction_);
 }
 
-// TextToolでのドラッグ操作(移動/拡縮/回転)中に呼ばれる。1文字入力ごと/1ドラッグ
-// フレームごとにrasterizeTextLayer(テクスチャ再確保を伴いうる)を連打すると
-// GPU側の処理が詰まってクラッシュしうるため、入力/操作が止まってから一定時間後に
-// まとめてラスタライズする(デバウンス。TextBoxEditActionが編集パネル用に持つ
-// 別のデバウンスタイマーとは独立)。
+// TextToolでのドラッグ操作(移動/拡縮/回転)中に呼ばれる。
 void CanvasWidget::scheduleTextRasterize(int layerIndex)
 {
     textRasterizeLayerIndex_ = layerIndex;
@@ -238,16 +180,14 @@ void CanvasWidget::scheduleTextRasterize(int layerIndex)
     textRasterizeTimer_->start(150);
 }
 
-// layer.textBoxesの内容をそれぞれQImageへラスタライズして1枚に合成し、レイヤーの
-// 実タイルへ焼き込む。ボックスが1つも無い場合は既存タイルを透明クリアするだけ
-// (縮小はしない)。
+// layer.textBoxesの内容をそれぞれQImageへラスタライズして1枚に合成し、レイヤーの実タイルへ焼き込む。
 void CanvasWidget::rasterizeTextLayer(int layerIndex)
 {
     if (!doc_ || layerIndex < 0 || layerIndex >= doc_->layerCount()) return;
     if (doc_->layerRef(layerIndex).layerType != LayerType::Text) return;
 
     makeCurrent();
-    // grow中の再確保に影響されないようコピー
+    // grow中の再確保に影響されないようコピー。
     const std::vector<TextParams> boxes = doc_->layerRef(layerIndex).textBoxes;
 
     // 全ボックスの回転後AABBの和集合を画像サイズとする(+余白)。
@@ -280,12 +220,7 @@ void CanvasWidget::rasterizeTextLayer(int layerIndex)
             font.setBold(box.bold);
             font.setItalic(box.italic);
             p.save();
-            // 後で画像全体を1回だけ上下反転する(下記)ため、反転後にbox.cyへ
-            // 正しく戻るよう、あらかじめ反転を見込んだY座標(imgY + h - box.cy)へ
-            // 描画しておく。単純にbox.cy - imgYを使うと、そのボックスが合成画像
-            // 全体の垂直中心にある場合(=ボックスが1つだけの場合)のみ正しく、
-            // 複数ボックスが同じ画像に収まる場合は他ボックスの位置に応じてズレる
-            // (1つのボックスを動かすと他のボックスも動いて見えるバグの原因だった)。
+            // 後で画像全体を1回だけ上下反転する(下記)ため、反転後にbox.cyへ正しく戻るよう、あらかじめ反転を見込んだY座標(imgY + h - box.cy)へ描画しておく。
             p.translate(box.cx - imgX, imgY + h - box.cy);
             p.rotate(box.rotation);
             p.scale(box.scale, box.scale);
@@ -297,8 +232,7 @@ void CanvasWidget::rasterizeTextLayer(int layerIndex)
         }
         p.end();
 
-        // QPainterはY下向き(通常の画像座標系)で描画するが、キャンバスピクセル座標は
-        // Y上向き(widgetToCanvas参照)なので、タイルへ書き込む前に上下反転させる。
+        // QPainterはY下向き(通常の画像座標系)で描画するが、キャンバスピクセル座標はY上向き(widgetToCanvas参照)なので、タイルへ書き込む前に上下反転させる。
         img = img.mirrored(false, true);
 
         const int minTx   = qFloor((double)imgX / TILE_SIZE);
@@ -336,24 +270,13 @@ void CanvasWidget::rasterizeTextLayer(int layerIndex)
         }
     }
 
-    // 1文字入力/1ドラッグフレームごとに呼ばれるため、連打するとgrowLayerBounds
-    // (テクスチャ再確保を伴いうる)~書き込みが連続で走る。GPU側の処理が完了しない
-    // うちに次の呼び出しでまたテクスチャを確保し直す(rebuildCanvasFromSnapshotsと
-    // 同種のタイミング依存クラッシュ)のを防ぐため、ここで明示的に完了を待つ。
+    // 1文字入力/1ドラッグフレームごとに呼ばれるため、連打するとgrowLayerBounds(テクスチャ再確保を伴いうる)~書き込みが連続で走る。
     glFinish();
 
     updateCompositedTex();
 }
 
-// ===========================================================================
 // カラーバランス(アクション)
-// ---------------------------------------------------------------------------
-// HueSatLightアクションと全く同じ構造。CanvasWidgetの子ウィジェットとして浮かせた
-// ColorBalancePanel(C/M/Yの3本のQSlider)から値を受け取る。
-// ===========================================================================
-// ===========================================================================
-// 色調整/フィルター系アクションの入口(フォワーダ)続き。実装は src/actions/ 側。
-// ===========================================================================
 void CanvasWidget::startColorBalanceAction() { cancelNonControllerActions(); actions_.start(colorBalanceAction_); }
 void CanvasWidget::startGaussianBlurAction() { cancelNonControllerActions(); actions_.start(gaussianBlurAction_); }
 void CanvasWidget::startCustomShaderAction() { cancelNonControllerActions(); actions_.start(customShaderAction_); }
@@ -361,9 +284,7 @@ void CanvasWidget::startMosaicAction()       { cancelNonControllerActions(); act
 void CanvasWidget::startMotionBlurAction()   { cancelNonControllerActions(); actions_.start(motionBlurAction_); }
 void CanvasWidget::startNoiseAction()        { cancelNonControllerActions(); actions_.start(noiseAction_); }
 
-// トーンカーブはPro限定機能(色収差と同じ案内ダイアログパターン)。ツール自体は
-// 無料版にも含まれる(CMakeLists上はPro専用に分離していない)ため、ここで
-// ライセンス確認だけを行う。
+// トーンカーブはPro限定機能(色収差と同じ案内ダイアログパターン)。
 void CanvasWidget::startToneCurveAction()
 {
 #ifdef TIEPOLO_PRO_BUILD
@@ -389,7 +310,7 @@ void CanvasWidget::startChromaticAberrationAction()
     cancelNonControllerActions();
     actions_.start(chromaticAberrationAction_);
 #else
-    // 無料版ビルドでは色収差アクション自体を持たない。案内ダイアログのみ。
+    // 無料版ビルドでは色収差アクション自体を持たない。
     ProFeatureDialog::show(this, QStringLiteral("色収差"));
 #endif
 }
@@ -405,7 +326,7 @@ void CanvasWidget::startLensBlurAction()
     cancelNonControllerActions();
     actions_.start(lensBlurAction_);
 #else
-    // 無料版ビルドではレンズぼかしアクション自体を持たない。案内ダイアログのみ。
+    // 無料版ビルドではレンズぼかしアクション自体を持たない。
     ProFeatureDialog::show(this, QStringLiteral("レンズぼかし"));
 #endif
 }
@@ -421,17 +342,12 @@ void CanvasWidget::startGradientMapAction()
     cancelNonControllerActions();
     actions_.start(gradientMapAction_);
 #else
-    // 無料版ビルドではグラデーションマップアクション自体を持たない。案内ダイアログのみ。
+    // 無料版ビルドではグラデーションマップアクション自体を持たない。
     ProFeatureDialog::show(this, QStringLiteral("グラデーションマップ"));
 #endif
 }
 
-// ===========================================================================
 // キャンバスサイズ変更 / 画像解像度変更(アクション)
-// ---------------------------------------------------------------------------
-// 実体は src/actions/CanvasSizeActions.h の CanvasSizeAction/ImageResolutionAction
-// へ移動した。ここに残るのはメニュー/ショートカットの入口だけ。
-// ===========================================================================
 void CanvasWidget::startCanvasSizeAction()
 {
     cancelNonControllerActions();
@@ -444,6 +360,4 @@ void CanvasWidget::startImageResolutionAction()
     actions_.start(imageResolutionAction_);
 }
 
-// ===========================================================================
-// 初期化
-// ===========================================================================
+// 初期化。

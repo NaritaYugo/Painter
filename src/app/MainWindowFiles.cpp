@@ -3,7 +3,7 @@
 #include "docks/LayerDock.h"
 #include "docks/ColorCircleDock.h"
 #include "docks/ToolDock.h"
-#include "docks/ToolPropDock.h"
+#include "docks/ToolPropertyDock.h"
 #include "docks/ToolPresetDock.h"
 #include "docks/BrushSizeDock.h"
 #include "docks/NavigatorDock.h"
@@ -17,7 +17,7 @@
 #include "document/RecentFiles.h"
 #include "io/AbrCodec.h"
 #include "io/AbrPenMapping.h"
-#include "dialogs/CalibrationDlg.h"
+#include "dialogs/CalibrationDialog.h"
 
 #include <QScreen>
 #include <QShowEvent>
@@ -117,7 +117,7 @@ void MainWindow::importPenSettingsFromAbr()
     QStringList notes = res.notes;
     notes += AbrPenMapping::applyToPen(res.brushes[index], toolCfg->pen());
 
-    toolPropDock->refreshFromSettings();
+    toolPropertyDock->refreshFromSettings();
     brushSizeDock->syncSize(toolCfg->pen().size());
     if (glWidget) glWidget->updateCursor();
 
@@ -159,7 +159,7 @@ void MainWindow::exportPenSettingsToAbr()
 
 void MainWindow::exportImage()
 {
-    QDir exportDir(SettingsDlg::loadValues().exportSaveDir);
+    QDir exportDir(SettingsDialog::loadValues().exportSaveDir);
     if (!exportDir.exists()) {
         exportDir.mkpath(".");
     }
@@ -227,7 +227,7 @@ void MainWindow::saveFile()
  
 void MainWindow::saveFileAs()
 {
-    QDir projectDir(SettingsDlg::loadValues().projectSaveDir);
+    QDir projectDir(SettingsDialog::loadValues().projectSaveDir);
     if (!projectDir.exists()) {
         projectDir.mkpath(".");
     }
@@ -423,4 +423,3 @@ void MainWindow::openFileIntoTab(CanvasTabPage *page, const QString &path)
 }
 
 // ファイルパスがあればそのファイル名、無ければ仮の名前("Canvas001"等、無ければ「無題」)
-

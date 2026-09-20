@@ -1,4 +1,4 @@
-#include "dialogs/ShortcutsDlg.h"
+#include "dialogs/ShortcutsDialog.h"
 #include "shortcuts/ShortcutRegistry.h"
 #include "tools/core/ToolConfig.h"
 #include "tools/core/ToolRegistry.h"
@@ -25,14 +25,14 @@ constexpr int kRowIndexRole = Qt::UserRole + 1;
 }
 
 // ===========================================================================
-QString ShortcutsDlg::keyName(int key)
+QString ShortcutsDialog::keyName(int key)
 {
     if (key == 0) return "（未設定）";
     return QKeySequence(key).toString(QKeySequence::NativeText);
 }
 
 // ===========================================================================
-ShortcutsDlg::ShortcutsDlg(ShortcutRegistry &registry, ToolConfig *toolCfg, QWidget *parent)
+ShortcutsDialog::ShortcutsDialog(ShortcutRegistry &registry, ToolConfig *toolCfg, QWidget *parent)
     : QDialog(parent), m_registry(registry), m_toolCfg(toolCfg)
 {
     setWindowTitle("ショートカットキー設定");
@@ -88,10 +88,10 @@ ShortcutsDlg::ShortcutsDlg(ShortcutRegistry &registry, ToolConfig *toolCfg, QWid
     });
 
     m_resetBtn = new QPushButton("デフォルトに戻す");
-    connect(m_resetBtn, &QPushButton::clicked, this, &ShortcutsDlg::resetDefaults);
+    connect(m_resetBtn, &QPushButton::clicked, this, &ShortcutsDialog::resetDefaults);
 
     auto *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(box, &QDialogButtonBox::accepted, this, &ShortcutsDlg::accept);
+    connect(box, &QDialogButtonBox::accepted, this, &ShortcutsDialog::accept);
     connect(box, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     btnRow->addWidget(m_clearBtn);
@@ -114,7 +114,7 @@ ShortcutsDlg::ShortcutsDlg(ShortcutRegistry &registry, ToolConfig *toolCfg, QWid
 // ツールプリセットの行は同じ category(=そのツールの category)のページ内で
 // ツールの行の子として並べられる。
 // ===========================================================================
-void ShortcutsDlg::buildRows()
+void ShortcutsDialog::buildRows()
 {
     m_rows.clear();
 
@@ -169,7 +169,7 @@ void ShortcutsDlg::buildRows()
 // category ごとにページを1枚ずつ作る(出現順)。
 // ツールの行にはそのツールのプリセットを子として付け、既定では閉じておく。
 // ===========================================================================
-void ShortcutsDlg::buildPages()
+void ShortcutsDialog::buildPages()
 {
     m_pages.clear();
     m_itemForRow.clear();
@@ -252,7 +252,7 @@ void ShortcutsDlg::buildPages()
 }
 
 // ===========================================================================
-void ShortcutsDlg::refreshItems()
+void ShortcutsDialog::refreshItems()
 {
     for (auto it = m_itemForRow.constBegin(); it != m_itemForRow.constEnd(); ++it) {
         const int rowIndex = it.key();
@@ -279,7 +279,7 @@ void ShortcutsDlg::refreshItems()
 }
 
 // ===========================================================================
-void ShortcutsDlg::setEditingRow(int rowIndex)
+void ShortcutsDialog::setEditingRow(int rowIndex)
 {
     m_editingRow = rowIndex;
     m_clearBtn->setEnabled(rowIndex >= 0);
@@ -291,7 +291,7 @@ void ShortcutsDlg::setEditingRow(int rowIndex)
 }
 
 // ===========================================================================
-void ShortcutsDlg::keyPressEvent(QKeyEvent *event)
+void ShortcutsDialog::keyPressEvent(QKeyEvent *event)
 {
     if (m_editingRow < 0) {
         QDialog::keyPressEvent(event);
@@ -322,7 +322,7 @@ void ShortcutsDlg::keyPressEvent(QKeyEvent *event)
 // 重複チェックは m_rows 全体をまたぐので、別カテゴリやツールプリセットとの
 // 衝突もここで拾える。
 // ===========================================================================
-void ShortcutsDlg::assignKey(int key)
+void ShortcutsDialog::assignKey(int key)
 {
     for (int i = 0; i < m_rows.size(); ++i) {
         if (i == m_editingRow) continue;
@@ -351,7 +351,7 @@ void ShortcutsDlg::assignKey(int key)
 }
 
 // ===========================================================================
-void ShortcutsDlg::resetDefaults()
+void ShortcutsDialog::resetDefaults()
 {
     // ツールプリセットには既定キーが無いので、defaultKey(=0)に戻す＝解除になる。
     for (ActionSpec &row : m_rows)
@@ -364,7 +364,7 @@ void ShortcutsDlg::resetDefaults()
 // 対応するQActionのshortcutをその場で更新するので、閉じた瞬間から
 // 新しいキーが有効になる(再起動不要)。
 // ===========================================================================
-void ShortcutsDlg::accept()
+void ShortcutsDialog::accept()
 {
     for (const ActionSpec &row : m_rows) {
         if (row.kind == ActionKind::ToolPreset)

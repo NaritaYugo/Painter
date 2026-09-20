@@ -36,11 +36,11 @@ public:
     
     void initialize(QOpenGLContext *ctx);
 
-    // テクスチャ/シェーダーを CanvasWidget 側から注入
+    // テクスチャ/シェーダーを CanvasWidget 側から注入。
     void setTextures(const Textures &tex)   { tex_ = tex; }
     void setPrograms(const Programs &prog)  { prog_ = prog; }
 
-    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)
+    // MainWindowが所有する唯一のToolConfigへの非所有ポインタ(CanvasWidget経由で渡される)。
     void setToolConfig(ToolConfig *cfg) { toolCfg_ = cfg; }
 
     void onMousePress(QMouseEvent *event, ToolContext &ctx) override
@@ -48,8 +48,7 @@ public:
         execute(ctx, event->position());
     }
 
-    // CanvasWidget::executeFill(pos, threshold) のような外部公開APIからも
-    // 同じロジックを呼べるように、実処理を独立したメンバ関数にしてある。
+    // CanvasWidget::executeFill(pos, threshold) のような外部公開APIからも同じロジックを呼べるように、実処理を独立したメンバ関数にしてある。
     bool execute(ToolContext &ctx, const QPointF &widgetPos);
 
     void  setWallThreshold(float t) { wallThreshold_ = t; }
@@ -66,7 +65,7 @@ private:
     void runJfaPasses(GLuint tex, GLenum fmt, int maxStep, int canvasW, int canvasH);
     QVector<float> buildSdf(int canvasW, int canvasH, GLuint defaultFbo);
 
-    // computeFillRegion()の結果: 塗りマスク(0/255)と実際に塗られた範囲のbbox
+    // computeFillRegion()の結果: 塗りマスク(0/255)と実際に塗られた範囲のbbox。
     struct FillRegion {
         QVector<uint8_t> mask;                          // canvasW*canvasH、塗る=255
         int minX = 0, maxX = -1, minY = 0, maxY = -1;   // maxX<minXなら空
@@ -74,6 +73,6 @@ private:
     FillRegion computeFillRegion(int canvasW, int canvasH, int sx, int sy,
                                  const QVector<float> &distField, bool wrapX, bool wrapY);
 
-    // 任意の2Dテクスチャから1ピクセルだけCPUへ読み出す(参照先="キャンバス"時の開始色取得用)
+    // 任意の2Dテクスチャから1ピクセルだけCPUへ読み出す(参照先="キャンバス"時の開始色取得用)。
     QColor readPixel(GLuint tex, int x, int y, GLuint defaultFbo);
 };

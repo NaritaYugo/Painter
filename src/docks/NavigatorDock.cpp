@@ -81,7 +81,7 @@ NavigatorDock::NavigatorDock(CanvasWidget *gl, QWidget *parent)
 
     // アイコンだけの正方形ボタン用の共通スタイル。style.qssのQPushButton共通ルール
     // (padding: 6px 16px; 等)がsetFixedSize()の効果を再polish時に上書きし、横長に
-    // なってしまうことがある(ToolPropDockの先端画像プレビューと同じ問題)ため、
+    // なってしまうことがある(ToolPropertyDockの先端画像プレビューと同じ問題)ため、
     // ウィジェット単位でpadding/min・maxサイズを明示的に固定する。
     const QString squareIconBtnStyle = QString(
         "QPushButton { padding: 0px; min-width: %1px; max-width: %1px; "

@@ -820,7 +820,7 @@ public:
     // 全ツール共通の筆圧カーブ(環境設定で編集する)。ツールごとのカーブより先に
     // 適用される。ツールプリセットとは無関係のアプリ全体の設定なので、他の
     // 全体設定(カラーモード/キャリブレーション等)と同じくここに直接持つ。
-    // 永続化は SettingsDlg 側(preferences/input/pressureCurve)が担当し、
+    // 永続化は SettingsDialog 側(preferences/input/pressureCurve)が担当し、
     // MainWindow が起動時と設定ダイアログのOK時にここへ反映する。
     PressureCurve &globalPressureCurve() { return globalPressureCurve_; }
     const PressureCurve &globalPressureCurve() const { return globalPressureCurve_; }

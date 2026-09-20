@@ -3,7 +3,7 @@
 #include "docks/LayerDock.h"
 #include "docks/ColorCircleDock.h"
 #include "docks/ToolDock.h"
-#include "docks/ToolPropDock.h"
+#include "docks/ToolPropertyDock.h"
 #include "docks/ToolPresetDock.h"
 #include "docks/BrushSizeDock.h"
 #include "docks/NavigatorDock.h"
@@ -17,7 +17,7 @@
 #include "document/RecentFiles.h"
 #include "io/AbrCodec.h"
 #include "io/AbrPenMapping.h"
-#include "dialogs/CalibrationDlg.h"
+#include "dialogs/CalibrationDialog.h"
 
 #include <QScreen>
 #include <QShowEvent>
@@ -78,15 +78,15 @@ void MainWindow::setColorMode(ColorMode m)
 
 void MainWindow::openCalibrationDialog()
 {
-    if (!calibrationDlg) {
-        calibrationDlg = new CalibrationDlg(this);
-        connect(calibrationDlg, &CalibrationDlg::valuesChanged, this, &MainWindow::setCalibration);
+    if (!calibrationDialog) {
+        calibrationDialog = new CalibrationDialog(this);
+        connect(calibrationDialog, &CalibrationDialog::valuesChanged, this, &MainWindow::setCalibration);
     }
     const CalibrationConfig &cal = toolCfg->calibration();
-    calibrationDlg->setValues(cal.brightness(), cal.contrast(), cal.cyan(), cal.magenta(), cal.yellow());
-    calibrationDlg->show();
-    calibrationDlg->raise();
-    calibrationDlg->activateWindow();
+    calibrationDialog->setValues(cal.brightness(), cal.contrast(), cal.cyan(), cal.magenta(), cal.yellow());
+    calibrationDialog->show();
+    calibrationDialog->raise();
+    calibrationDialog->activateWindow();
 }
 
 void MainWindow::setCalibration(int brightness, int contrast, int cyan, int magenta, int yellow)
@@ -107,7 +107,7 @@ void MainWindow::propagateDisplayConfigToAllTabs()
         gl->applyDisplayConfig();
 }
 
-// ---- UIテーマ --------------------------------------------------------------
+// UIテーマ
 
 void MainWindow::setUiTheme(Theme::Name n)
 {
@@ -116,22 +116,19 @@ void MainWindow::setUiTheme(Theme::Name n)
 
     (n == Theme::Name::Dark ? themeDarkAction : themeLightAction)->setChecked(true);
 
-    // QSSの再適用だけではDraggablePanel::paintEvent()等、Theme::を直接参照する
-    // QPainter描画は自動で再描画されないため、明示的に全ウィジェットへupdate()する。
+    // QSSの再適用だけではDraggablePanel::paintEvent()等、Theme::を直接参照するQPainter描画は自動で再描画されないため、明示的に全ウィジェットへupdate()する。
     const auto widgets = QApplication::allWidgets();
     for (QWidget *w : widgets) w->update();
 
     QSettings().setValue("ui/theme", (int)n);
 }
 
-// ---- キャンバス外側の背景色 --------------------------------------------------
+// キャンバス外側の背景色
 
 void MainWindow::chooseCanvasBackgroundColor()
 {
     const QColor current = toolCfg->canvasBackground().color();
-    // ネイティブのWindows色選択ダイアログは、環境によって(マルチモニタ構成等)
-    // ジオメトリ設定に失敗しダイアログが壊れた状態になることがあるため、
-    // Qt自前描画のダイアログを強制する。
+    // ネイティブのWindows色選択ダイアログは、環境によって(マルチモニタ構成等)ジオメトリ設定に失敗しダイアログが壊れた状態になることがあるため、Qt自前描画のダイアログを強制する。
     const QColor picked = QColorDialog::getColor(current, this, "キャンバス背景色を選択",
                                                    QColorDialog::DontUseNativeDialog);
     if (!picked.isValid()) return;
@@ -156,8 +153,7 @@ void MainWindow::resetAllSettingsAndQuit()
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (reply != QMessageBox::Yes) return;
 
-    // closeEvent()内のsaveSettings()でリセット前の値を書き戻されてしまわないよう、
-    // まずclose()を通して(未保存の変更があれば通常通り確認ダイアログも出る)、
+    // closeEvent()内のsaveSettings()でリセット前の値を書き戻されてしまわないよう、まずclose()を通して(未保存の変更があれば通常通り確認ダイアログも出る)、
     // 実際にウィンドウが閉じられたのを確認してからQSettingsを消す。
     m_resettingSettings_ = true;
     const bool closed = close();
@@ -202,7 +198,7 @@ QString MainWindow::getUniqueFilePath(const QString &basePath, int fillDigit) {
     int counter = 1;
     QString newPath;
     do {
-        // 例: filename_01.png, filename_02.png
+        // 例: filename_01.png, filename_02.png。
         QString numberedName = QString("%1%2.%3")
                                .arg(baseName)
                                .arg(counter, fillDigit, 10, QChar('0'))
@@ -218,19 +214,17 @@ void MainWindow::saveSettings()
 {
     QSettings settings;
 
-    // ウィンドウの状態
+    // ウィンドウの状態。
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state",    saveState());
 
-    // 各ツールのツールプリセット一覧(名前+設定値)をまるごと保存する
+    // 各ツールのツールプリセット一覧(名前+設定値)をまるごと保存する。
     toolCfg->saveToSettings(settings);
 
     settings.setValue("tool/color/rawRGBA", toolCfg->color().rawRGBA());
     settings.setValue("tool/color/transparent", toolCfg->color().isTransparent());
 
-    // 選択中ツールは各CanvasWidgetインスタンス(タブ)ごとの状態なので、終了時点で
-    // 実際にUIに表示されていたもの(現在のタブ、タブが1枚も無ければdeckCanvasWidget_)
-    // を保存する。
+    // 選択中ツールは各CanvasWidgetインスタンス(タブ)ごとの状態なので、終了時点で実際にUIに表示されていたもの(現在のタブ、タブが1枚も無ければdeckCanvasWidget_)を保存する。
     {
         CanvasWidget *gl = glWidget ? glWidget : deckCanvasWidget_;
         settings.setValue("tool/activeType", (int)gl->getActiveTool());
@@ -255,21 +249,7 @@ void MainWindow::loadSettings()
     if (settings.contains("window/geometry"))
         restoreGeometry(settings.value("window/geometry").toByteArray());
 
-    // このアプリに全画面表示の機能は無い。にもかかわらず保存済みジオメトリに
-    // 全画面状態が入っていることがあり、restoreGeometry()がそれを復元してしまう。
-    //
-    // Qtの全画面処理はウィンドウスタイルをWS_POPUPに差し替え(=WS_CAPTIONも
-    // WS_THICKFRAMEも落ちる)、ジオメトリを画面矩形ぴったりに合わせる。その結果、
-    // ウィンドウ矩形がモニタ矩形と完全一致し、Windowsのシェルはこれを「最大化」では
-    // なく「全画面アプリ」と判定する。そこから
-    //   ・自動的に隠れるタスクバーが出てこない
-    //   ・DWMがDirect Flipに切り替わり、メニュー等が重なるたび点滅・暗転する
-    //   ・GLの面のアルファがそのまま合成され、メニューバーが透ける
-    // が同時に起きる。しかも終了時にまた全画面として保存されるため、一度入ると
-    // 起動のたびに再現し続ける(「一度手で動かして最大化し直すと以後は直る」のは、
-    // その操作で全画面状態を抜けるため)。
-    //
-    // 全画面で保存されていたら最大化として復元し、この循環を断つ。
+    // このアプリに全画面表示の機能は無い。
     if (isFullScreen()) {
         WINLOG(QStringLiteral("CTOR 保存済みジオメトリが全画面状態だったため最大化へ変換する"));
         setWindowState((windowState() & ~Qt::WindowFullScreen) | Qt::WindowMaximized);
@@ -279,28 +259,14 @@ void MainWindow::loadSettings()
         savedDockState_ = settings.value("window/state").toByteArray();
         restoreState(savedDockState_);
 
-        // ここで貼っただけでは足りない。restoreState()は「そのときのウィンドウ
-        // サイズ」を基準にドックの幅を配分するが、この時点のウィンドウはまだ
-        // 「通常時のサイズ」しかない。最大化で保存されていた場合、実際の最大化
-        // サイズが決まるのは表示されてからなので、小さいサイズを基準に配分されて
-        // ドックが最小幅まで潰れる。しかもQMainWindowは後から増えた幅を中央
-        // ウィジェットに全部渡すため、潰れたドックは潰れたまま残る
-        // (実測: restoreState時 win=764 -> nav=100px、最終 win=1536 で
-        //  central だけ 362 -> 1134 に広がり nav=100 のまま)。
-        //
-        // そこでサイズが落ち着いてからもう一度貼り直す。ここで貼っておくのは
-        // 起動直後の見た目を大きく崩さないため(貼り直しは差分の微調整になる)。
+        // ここで貼っただけでは足りない。
         dockRestorePending_ = true;
     }
     logDockLayout(QStringLiteral("after restoreState"));
 
-    // 以前のバージョンでは、タブが1枚も無い間はDockごと非表示にしていたため、
-    // その頃保存されたレイアウトを読み込むと非表示状態のまま復元されてしまう。
-    // 現在はDockを常に表示する方針(タブが無ければ中身が空になるだけ)なので、
-    // 起動時に一度だけ強制的に可視化しておく(以降はユーザーが表示(V)メニューで
-    // 個別に隠す分には、この後は一切触らない)。
+    // 以前のバージョンでは、タブが1枚も無い間はDockごと非表示にしていたため、その頃保存されたレイアウトを読み込むと非表示状態のまま復元されてしまう。
     toolDockWidget->show();
-    toolPropDockWidget->show();
+    toolPropertyDockWidget->show();
     toolPresetDockWidget->show();
     brushSizeDockWidget->show();
     navigatorDockWidget->show();
@@ -308,10 +274,10 @@ void MainWindow::loadSettings()
     layerDockWidget->show();
 
     if (settings.contains("toolPresets/pen/active")) {
-        // 新形式: ツールプリセット一覧をまるごと復元
+        // 新形式: ツールプリセット一覧をまるごと復元。
         toolCfg->loadFromSettings(settings);
     } else {
-        // 旧形式(ツールプリセット機能追加前、単一プリセットのみ)からの移行
+        // 旧形式(ツールプリセット機能追加前、単一プリセットのみ)からの移行。
         if (settings.contains("tool/pen/size")) {
             toolCfg->pen().setSize(settings.value("tool/pen/size").toInt());
             toolCfg->pen().setOpacity(settings.value("tool/pen/opacity").toInt());
@@ -329,8 +295,7 @@ void MainWindow::loadSettings()
     if (settings.contains("tool/color/rawRGBA")) {
         const QColor restoredColor = settings.value("tool/color/rawRGBA").value<QColor>();
         toolCfg->color().setRawRGBA(restoredColor);
-        // toolCfg側には反映されるが、カラーサークルの表示(見た目)は別に
-        // 設定してやらないと復元されない。
+        // toolCfg側には反映されるが、カラーサークルの表示(見た目)は別に設定してやらないと復元されない。
         colorCircleDock->setColor(restoredColor);
     }
     {
@@ -341,13 +306,11 @@ void MainWindow::loadSettings()
 
     if (settings.contains("tool/activeType")) {
         const ToolType restoredTool = (ToolType)settings.value("tool/activeType").toInt();
-        // タブが1枚も無い起動直後はdeckCanvasWidget_がUIの実体なので、そちらの
-        // アクティブツールを復元してからボタン表示を同期させる(CanvasWidget側の
-        // activeToolはインスタンスごとの状態で、QSettingsには保存されていない
-        // ため、UI(ToolDock)側だけ直しても実体と再びズレてしまう)。
+        // タブが1枚も無い起動直後はdeckCanvasWidget_がUIの実体なので、そちらのアクティブツールを復元してからボタン表示を同期させる(CanvasWidget側のactiveToolはインスタンスごとの状態で、
+        // QSettingsには保存されていないため、UI(ToolDock)側だけ直しても実体と再びズレてしまう)。
         deckCanvasWidget_->setActiveTool(restoredTool);
         toolDock->syncButton(restoredTool);
-        toolPropDock->setCurrentTool(restoredTool);
+        toolPropertyDock->setCurrentTool(restoredTool);
         brushSizeDock->syncSize(brushSizeFor(toolCfg, restoredTool));
     }
 
@@ -375,7 +338,7 @@ void MainWindow::loadSettings()
     if (settings.contains("display/canvasBgColor"))
         toolCfg->canvasBackground().setColor(settings.value("display/canvasBgColor").value<QColor>());
 
-    toolPropDock->refreshFromSettings();
+    toolPropertyDock->refreshFromSettings();
     toolPresetDock->refresh();
 
     updateCentralPage();
@@ -383,11 +346,9 @@ void MainWindow::loadSettings()
 
 void MainWindow::resetDockLayout()
 {
-    // ドックが現在フローティング状態(独立ウィンドウとして切り離されている)だと、
-    // このあとの配置がその浮いたドックをうまく元のドック領域へ戻せない
-    // (浮いたトップレベルウィンドウのままになる)ことがあるため、まず全部
-    // 明示的にドッキング状態へ戻してから配置し直す。
-    for (QDockWidget *dw : { toolDockWidget, toolPropDockWidget, toolPresetDockWidget,
+    // ドックが現在フローティング状態(独立ウィンドウとして切り離されている)だと、このあとの配置がその浮いたドックをうまく元のドック領域へ戻せない(浮いたトップレベルウィンドウのままになる)ことがあるため、
+    // まず全部明示的にドッキング状態へ戻してから配置し直す。
+    for (QDockWidget *dw : { toolDockWidget, toolPropertyDockWidget, toolPresetDockWidget,
                              brushSizeDockWidget, navigatorDockWidget,
                              colorCircleDockWidget, layerDockWidget }) {
         if (dw->isFloating()) dw->setFloating(false);
@@ -395,34 +356,20 @@ void MainWindow::resetDockLayout()
 
     showMaximized();
 
-    // QMainWindow::saveState()のバイナリ(restoreState())だけに頼ると、実際に
-    // ドラッグ&ドロップでドックを並べた際の内部的な親子階層(どのsplitterの下に
-    // どのドックがぶら下がっているか)がGUI上の見た目だけでは判別できず、見た目は
-    // 意図通りでも階層がずれてしまうことがあった。そのため、まず1) splitDockWidget()で
-    // 親子階層そのものを常に同じ形になるよう明示的に確定させ、2) resizeDocks()で
-    // 最低限見られる状態のサイズを既定値として設定したうえで、3) この階層と一致する
-    // 状態でダンプされたinitial_layout.txtがあれば、そのサイズ配分だけを
-    // restoreState()で上書き適用して微調整する(階層自体はすでに1で確定しているため、
-    // 一致するダンプであればrestoreState()はサイズの復元だけを行い階層を壊さない)。
-    //
-    // 左端: ナビゲーター/ツールプリセット/ツール設定/ブラシサイズを縦に積んだ1列
-    // その右: ツールアイコン列(toolDockWidget)
-    // 右端: カラーサークル/レイヤーを縦に積んだ1列
+    // QMainWindow::saveState()のバイナリ(restoreState())だけに頼ると、実際にドラッグ&ドロップでドックを並べた際の内部的な親子階層(どのsplitterの下にどのドックがぶら下がっているか)がGUI上の見た目
+    // だけでは判別できず、見た目は意図通りでも階層がずれてしまうことがあった。
     splitDockWidget(navigatorDockWidget, toolDockWidget, Qt::Horizontal);
     splitDockWidget(navigatorDockWidget, toolPresetDockWidget, Qt::Vertical);
-    splitDockWidget(toolPresetDockWidget, toolPropDockWidget, Qt::Vertical);
-    splitDockWidget(toolPropDockWidget, brushSizeDockWidget, Qt::Vertical);
+    splitDockWidget(toolPresetDockWidget, toolPropertyDockWidget, Qt::Vertical);
+    splitDockWidget(toolPropertyDockWidget, brushSizeDockWidget, Qt::Vertical);
     splitDockWidget(colorCircleDockWidget, layerDockWidget, Qt::Vertical);
 
     resizeDocks({ navigatorDockWidget, toolDockWidget }, { 220, 40 }, Qt::Horizontal);
-    resizeDocks({ navigatorDockWidget, toolPresetDockWidget, toolPropDockWidget, brushSizeDockWidget },
+    resizeDocks({ navigatorDockWidget, toolPresetDockWidget, toolPropertyDockWidget, brushSizeDockWidget },
                 { 260, 200, 260, 120 }, Qt::Vertical);
     resizeDocks({ colorCircleDockWidget, layerDockWidget }, { 260, 400 }, Qt::Vertical);
 
     // 3) 上記と同じ階層で保存されたダンプがあれば、サイズ配分だけを微調整として適用する。
-    // (:/texts/initial_layout.txtが無い/空の場合は何もしない=上のresizeDocks()の
-    //  既定値がそのまま使われる。「レイアウトをダンプ」で書き出したファイルを
-    //  resources/texts/initial_layout.txtに置き、resources.qrcに登録すると有効になる)
     {
         QFile file(":/texts/initial_layout.txt");
         if (file.open(QIODevice::ReadOnly)) {
@@ -433,7 +380,7 @@ void MainWindow::resetDockLayout()
     }
 
     toolDockWidget->show();
-    toolPropDockWidget->show();
+    toolPropertyDockWidget->show();
     toolPresetDockWidget->show();
     brushSizeDockWidget->show();
     navigatorDockWidget->show();
@@ -443,20 +390,12 @@ void MainWindow::resetDockLayout()
     updateCentralPage();
 }
 
-// ドックを重ねてタブ化すると、Qtは切り替え用に独自のQTabBarを遅延生成する
-// (DockTitleBarとは別物で、各ドックの閉じるボタンも引き継がれない)。それを
-// 見つけ次第、DockTitleBarと揃うQSS(#dockGroupTabBar)を当て、タブごとに
-// 閉じるボタンを付け直す。
+// ドックを重ねてタブ化すると、Qtは切り替え用に独自のQTabBarを遅延生成する(DockTitleBarとは別物で、各ドックの閉じるボタンも引き継がれない)。
 void MainWindow::styleNewDockTabBars()
 {
     const auto bars = findChildren<QTabBar *>();
     for (QTabBar *bar : bars) {
-        // findChildren はQObjectの親子関係を辿るため、MainWindowを親にして開いた
-        // ダイアログ(ショートカット設定など)が持つタブバーまで拾ってしまう。
-        // ドックのグループ用タブバーはMainWindow自身の中に作られるので、
-        // 別ウィンドウに属するものはここで除外する(これを入れないと、
-        // タブ付きダイアログのタブに閉じるボタンとドラッグ用の
-        // イベントフィルターが付いてしまう)。
+        // findChildren はQObjectの親子関係を辿るため、MainWindowを親にして開いたダイアログ(ショートカット設定など)が持つタブバーまで拾ってしまう。
         if (bar->window() != this)
             continue;
         if (qobject_cast<CanvasTabBar *>(bar))
@@ -470,9 +409,7 @@ void MainWindow::styleNewDockTabBars()
         bar->setDrawBase(false);
         bar->style()->unpolish(bar);
         bar->style()->polish(bar);
-        // タブをつまんでフロート化(タブ化解除)できるよう、mousePress/Move/Releaseを
-        // eventFilter側で横取りして自前でドラッグを実装する。Qt標準の「タブを
-        // ドラッグして外す」機構はグループ先頭のドックには効かないため。
+        // タブをつまんでフロート化(タブ化解除)できるよう、mousePress/Move/ReleaseをeventFilter側で横取りして自前でドラッグを実装する。
         bar->installEventFilter(this);
 
         connect(bar, &QTabBar::tabCloseRequested, this, [this, bar](int index) {
@@ -488,14 +425,11 @@ void MainWindow::styleNewDockTabBars()
     }
 }
 
-// タブ化中は切り替えタブ(上)と各ドックのDockTitleBar(下)が二重に出るため、
-// タブ化されている間だけDockTitleBarを高さ0のダミーに差し替えて隠す。
-// タブから外すためのドラッグは、DockTitleBarではなくタブバー自体で
-// (下のeventFilter経由で)扱うため、この置き換えで支障は無い。
+// タブ化中は切り替えタブ(上)と各ドックのDockTitleBar(下)が二重に出るため、タブ化されている間だけDockTitleBarを高さ0のダミーに差し替えて隠す。
 void MainWindow::updateTabifiedTitleBars()
 {
     const QList<QDockWidget *> docks = {
-        toolDockWidget, toolPropDockWidget, toolPresetDockWidget,
+        toolDockWidget, toolPropertyDockWidget, toolPresetDockWidget,
         brushSizeDockWidget, navigatorDockWidget, colorCircleDockWidget, layerDockWidget,
     };
     for (QDockWidget *dock : docks) {
@@ -520,18 +454,16 @@ void MainWindow::updateTabifiedTitleBars()
 
 void MainWindow::openSettingsDialog()
 {
-    SettingsDlg dlg(this);
-    if (dlg.exec() != QDialog::Accepted) return;
+    SettingsDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) return;
 
-    const SettingsDlg::Values v = SettingsDlg::loadValues();
+    const SettingsDialog::Values v = SettingsDialog::loadValues();
 
     // Undo履歴の保持数は既に開いている全タブへ即座に反映する
-    // (新規に作られるキャンバスはensureCanvas()が毎回読み込む)。
     for (CanvasWidget *gl : allCanvasWidgets())
         gl->document().setMaxUndo(v.undoHistoryLimit);
 
     // 色相ツイストはカラーサークル全体で共有する設定なので、生きている
-    // 全インスタンスへ一括で反映する(ColorWheelWidget::setHueTwist)。
     ColorWheelWidget::setHueTwist((float)v.hueTwist);
 
     applyGlobalPressureCurve();
@@ -540,28 +472,22 @@ void MainWindow::openSettingsDialog()
 }
 
 // 環境設定の「全体の筆圧カーブ」をToolConfigへ反映する
-// (起動時のMainWindowコンストラクタ、および設定ダイアログでOKされた直後に呼ぶ)。
-// ToolConfigはアプリに1つでキャンバスをまたいで共有されるため、開いている
-// タブごとの反映は要らない。
 void MainWindow::applyGlobalPressureCurve()
 {
     if (!toolCfg) return;
-    toolCfg->globalPressureCurve().setPoints(SettingsDlg::loadValues().pressureCurve);
+    toolCfg->globalPressureCurve().setPoints(SettingsDialog::loadValues().pressureCurve);
 }
 
 // 設定ダイアログの自動保存の有効/間隔をタイマーへ反映する
-// (起動時のMainWindowコンストラクタ、および設定ダイアログでOKされた直後に呼ぶ)。
 void MainWindow::applyAutoSaveSettings()
 {
-    const SettingsDlg::Values v = SettingsDlg::loadValues();
+    const SettingsDialog::Values v = SettingsDialog::loadValues();
     autoSaveTimer_->stop();
     if (v.autoSaveEnabled)
         autoSaveTimer_->start(v.autoSaveInterval * 60 * 1000);
 }
 
-// 自動保存: 保存先が既に決まっている(=一度でも保存/別名で保存/開くを行った)
-// タブだけを対象に、そのファイルへ上書き保存する。未保存の新規タブは対象外
-// (保存ダイアログを勝手に出すと作業の邪魔になるため)。
+// 自動保存: 保存先が既に決まっている(=一度でも保存/別名で保存/開くを行った)タブだけを対象に、そのファイルへ上書き保存する。
 void MainWindow::performAutoSave()
 {
     for (CanvasWidget *gl : allCanvasWidgets()) {
@@ -581,25 +507,20 @@ void MainWindow::openNewCanvasDialog()
     newCanvasInTab(nullptr); // OKされてから追加先タブを決める
 }
 
-// pageをキャンバスに変えて新規キャンバスを作る。pageがnullptrなら、ダイアログで
-// OKされた時点でtargetTabPageForNewDocument()に決めさせる(キャンセルされたときに
-// 空のタブを作ってしまわないようにするため)。
+// pageをキャンバスに変えて新規キャンバスを作る。
 void MainWindow::newCanvasInTab(CanvasTabPage *page)
 {
-    NewCanvasDlg dlg(this);
-    if (dlg.exec() != QDialog::Accepted) return;
+    NewCanvasDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) return;
 
     if (!page) page = targetTabPageForNewDocument();
 
-    // 他のタブは一切変更せず、このタブにだけキャンバスを作成する。CanvasWidgetは
-    // 作られた直後はinitializeGL()完了が非同期なため、CanvasWidget::initializedを
-    // 待ってからrecreateCanvas()を呼ぶ(shaderプログラム/テクスチャがまだ無い
-    // 状態で呼ぶと壊れるため)。
+    // 他のタブは一切変更せず、このタブにだけキャンバスを作成する。
     CanvasWidget *gl = ensureCanvas(page);
     gl->setProvisionalName(generateUniqueCanvasName());
     updateTabLabel(page);
-    const int w = dlg.canvasWidth(), h = dlg.canvasHeight();
-    const bool wx = dlg.wrapX(), wy = dlg.wrapY();
+    const int w = dialog.canvasWidth(), h = dialog.canvasHeight();
+    const bool wx = dialog.wrapX(), wy = dialog.wrapY();
     connect(gl, &CanvasWidget::initialized, gl, [gl, w, h, wx, wy]() {
         gl->recreateCanvas(w, h, true, wx, wy);
     }, Qt::SingleShotConnection);
@@ -610,8 +531,4 @@ void MainWindow::newCanvasInTab(CanvasTabPage *page)
     updateCentralPage();
 }
 
-// 最初のキャンバス(QOpenGLWidget)が現れると、Qtは描画サーフェスの種別を変えるために
-// トップレベルのネイティブウィンドウを作り直す。そのたびにフレーム計算とウィンドウ
-// リージョンを貼り直さないと、メニューバーが透明かつ掴めない状態になる
-// (MainWindow::refreshNativeFrame()のコメント参照)。
-
+// 最初のキャンバス(QOpenGLWidget)が現れると、Qtは描画サーフェスの種別を変えるためにトップレベルのネイティブウィンドウを作り直す。

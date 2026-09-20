@@ -2,7 +2,7 @@
 #include "tools/core/ToneCurveMath.h"
 #include <algorithm>
 
-// 小さな2Dテクスチャを作るための内部ヘルパー
+// 小さな2Dテクスチャを作るための内部ヘルパー。
 static GLuint makeTexture2D(QOpenGLFunctions_4_3_Core *gl, GLenum internalFormat,
                             int w, int h, GLenum filter = GL_NEAREST)
 {
@@ -15,8 +15,8 @@ static GLuint makeTexture2D(QOpenGLFunctions_4_3_Core *gl, GLenum internalFormat
     return tex;
 }
 
-// QOpenGLShaderProgram::setUniformValue(name, QPoint) はこの環境では ivec2 uniform に
-// 対して値が反映されないため(型解決の問題)、ivec2 はglUniform2iで直接設定する。
+// QOpenGLShaderProgram::setUniformValue(name, QPoint) はこの環境では ivec2 uniform に対して値が反映されないため(型解決の問題)、
+// ivec2 はglUniform2iで直接設定する。
 static void setUniformIVec2(QOpenGLFunctions_4_3_Core *gl, QOpenGLShaderProgram *prog,
                              const char *name, int x, int y)
 {
@@ -25,10 +25,7 @@ static void setUniformIVec2(QOpenGLFunctions_4_3_Core *gl, QOpenGLShaderProgram 
         gl->glUniform2i(loc, x, y);
 }
 
-// 調整レイヤー(ToneCurve/GradientMap)のLUTを、確保済みのタイル配列スライス
-// (1枚、256x256)のy=0行(256エントリ)へ書き込む。書き込みは常にRGBA(4バイト/エントリ)
-// で行い、ToneCurveはR=G=B=値・A=255として埋める(シェーダー側はチャンネル毎に
-// .rだけ読む。GradientMapTool::rebuildLutと同じ形式に揃えてある)。
+// 調整レイヤー(ToneCurve/GradientMap)のLUTを、確保済みのタイル配列スライス(1枚、256x256)のy=0行(256エントリ)へ書き込む。
 static void uploadAdjustmentLut(ToolContext &ctx, int slice, const quint8 *lutRgba /* [256*4] */)
 {
     ctx.gl->glBindTexture(GL_TEXTURE_2D_ARRAY, ctx.bankTexOf(slice));
@@ -37,8 +34,7 @@ static void uploadAdjustmentLut(ToolContext &ctx, int slice, const quint8 *lutRg
     ctx.gl->glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }
 
-// GradientMapTool::rebuildLut()と全く同じ補間(ストップ間の素直な線形補間、
-// 端の外側は端の色でクランプ)で256段階(輝度0-255入力)のLUTを構築する。
+// GradientMapTool::rebuildLut()と全く同じ補間(ストップ間の素直な線形補間、端の外側は端の色でクランプ)で256段階(輝度0-255入力)のLUTを構築する。
 static void buildGradientMapLut256(const QVector<AdjustmentGradientStop> &stops, quint8 *outLut /* [256*4] */)
 {
     const int n = stops.size();
@@ -73,9 +69,7 @@ static void buildGradientMapLut256(const QVector<AdjustmentGradientStop> &stops,
     }
 }
 
-// ===========================================================================
-// タイル走査の共通化
-// ===========================================================================
+// タイル走査の共通化。
 void CanvasCompositor::forEachCanvasTile(const CanvasDocument &doc, const TileVisitFn &fn)
 {
     for (int ty = 0; ty < doc.tilesY(); ty++)
@@ -83,9 +77,7 @@ void CanvasCompositor::forEachCanvasTile(const CanvasDocument &doc, const TileVi
             fn(tx, ty);
 }
 
-// ===========================================================================
-// レイヤーuniform / SSBO
-// ===========================================================================
+// レイヤーuniform / SSBO。
 void CanvasCompositor::setLayerUniforms(ToolContext &ctx, QOpenGLShaderProgram *prog, int tx, int ty)
 {
     CanvasDocument &doc = *ctx.doc;
@@ -95,10 +87,7 @@ void CanvasCompositor::setLayerUniforms(ToolContext &ctx, QOpenGLShaderProgram *
     prog->setUniformValue("uCanvasTilesX", doc.tilesX()); // レイヤーマスクのタイル参照(常にキャンバス全体)用
     setUniformIVec2(ctx.gl, prog, "uTileOffset", tx * tileSize, ty * tileSize);
 
-    // タイル配列(旧 layerTexArray)は複数バンクへ分割されたので、全バンクを
-    // ユニット LAYER_BANK_TEXUNIT_BASE.. へバインドし、composite.comp の
-    // sampler2DArray 配列 uniform "layerTexBanks[]" と "uSlicesPerBank" を設定する。
-    // 未生成バンクのスロットにはbank0を割り当てておく(サンプル対象になり得ないので中身は不問)。
+    // タイル配列(旧 layerTexArray)は複数バンクへ分割されたので、全バンクをユニット LAYER_BANK_TEXUNIT_BASE..
     GLint bankUnits[MAX_TILE_BANKS];
     for (int i = 0; i < MAX_TILE_BANKS; i++) {
         ctx.gl->glActiveTexture(GL_TEXTURE0 + LAYER_BANK_TEXUNIT_BASE + i);
@@ -124,17 +113,11 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
     const int maxLayers = ctx.maxLayers;
     const int n = qMin(doc.layers.size(), maxLayers);
 
-    // フォルダー(祖先)ぶんの表示・不透明度・マスクをレイヤーへカスケードさせる
-    // ための一覧(外側→内側の順、各要素は祖先フォルダーのlayers index)。
+    // フォルダー(祖先)ぶんの表示・不透明度・マスクをレイヤーへカスケードさせるための一覧(外側→内側の順、各要素は祖先フォルダーのlayers index)。
     const QVector<QVector<int>> ancestorsPerLayer = doc.computeAncestorFolders();
     static constexpr int MAX_ANCESTOR_MASKS = 4; // レイヤーあたりカスケードするフォルダーマスクの最大階層数
 
-    // 配列/アップロードは maxLayers(=MAX_LAYERS、上限8192)ではなく実レイヤー数 n 個
-    // ぶんだけ確保・転送する。シェーダーは uLayerCount(= doc.layers.size() = n)までしか
-    // 参照しないため結果は同一で、毎フレームの確保・GPUアップロード量が実レイヤー数に
-    // 比例するようになる(以前は1枚でも常に8192枚分=約1MB/フレームを転送していて、
-    // これがストローク中の描画(paintGL)が重い主因だった)。n==0(レイヤー無し)でも
-    // QVector(0)/glBufferSubData(size 0)は安全な no-op。
+    // 配列/アップロードは maxLayers(=MAX_LAYERS、上限8192)ではなく実レイヤー数 n 個ぶんだけ確保・転送する。
     const int nn = qMax(0, n);
     QVector<float> opacity(nn, 1.0f);
     QVector<int>   visible(nn, 1);
@@ -155,9 +138,7 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
     for (int z = 0; z < n; z++) {
         const Layer &layer = doc.layers[z];
 
-        // フォルダー単位の表示・不透明度・マスクをこのレイヤーへ乗算でカスケードする
-        // (Photoshopの「通過(パススルー)」グループと同じ考え方: グループ自身は
-        // ブレンドモードに影響しないが、表示/不透明度/マスクは中身へそのまま掛かる)。
+        // フォルダー単位の表示・不透明度・マスクをこのレイヤーへ乗算でカスケードする(Photoshopの「通過(パススルー)」グループと同じ考え方: グループ自身はブレンドモードに影響しないが、表示/不透明度/マスクは中身へそのまま掛かる)。
         float effOpacity = layer.opacity;
         bool  effVisible = layer.visible;
         int   maskSlot = 0;
@@ -168,9 +149,6 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
             effOpacity *= folder.opacity;
             effVisible = effVisible && folder.visible;
             // hasMaskが立っているのにmaskTilesが空、という不整合はここで弾く。
-            // 起こりうるのは壊れた/古い形式のファイルを読んだ場合(実際にTPLOローダーが
-            // マスクの実体を確保せずフラグだけ立てていて、ここで範囲外アクセスして
-            // クラッシュしていた)。データの不整合で落とさないよう「マスク無し」扱いにする。
             if (folder.hasMask && !folder.maskTiles.isEmpty() && maskSlot < MAX_ANCESTOR_MASKS) {
                 ancestorMaskSlices[z * MAX_ANCESTOR_MASKS + maskSlot] = folder.maskTiles[0][0];
                 maskSlot++;
@@ -195,10 +173,7 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
             solidColor[z * 4 + 3] = (float)layer.solidColor.alphaF();
         }
 
-        // フィルターレイヤーは合成ループでは何もしない印(3)を立てるだけ。効果は
-        // 近傍参照なのでループの中では計算できず、CanvasWidget::rebuildFilterChain() が
-        // 合成をここで打ち切ってオフスクリーンでかける(CanvasDocument.h の
-        // LayerType::Filter のコメント参照)。
+        // フィルターレイヤーは合成ループでは何もしない印(3)を立てるだけ。
         if (layer.layerType == LayerType::Filter)
             adjKind[z] = 3;
 
@@ -206,14 +181,11 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
             const AdjustmentKind kind = layer.adjustment.kind;
             const bool needsLut = (kind == AdjustmentKind::ToneCurve || kind == AdjustmentKind::GradientMap);
 
-            // 種別(kind)がLUT不要なものへ変わっていたら、ここで気づいたタイミングで
-            // 確保済みのLUTスライスを解放する(セルフヒーリング。CanvasDocument.h
-            // Layer::lutSliceのコメント参照)。
+            // 種別(kind)がLUT不要なものへ変わっていたら、ここで気づいたタイミングで確保済みのLUTスライスを解放する(セルフヒーリング。CanvasDocument.h Layer::lutSliceのコメント参照)。
             if (!needsLut && layer.lutSlice >= 0)
                 doc.freeAdjustmentLutSlice(z);
 
-            // BrightnessContrastTool/HueSatLightTool/ColorBalanceTool(いずれも破壊的な
-            // 編集アクション)と同じ単位変換で揃える(見た目が一致するように)。
+            // BrightnessContrastTool/HueSatLightTool/ColorBalanceTool(いずれも破壊的な編集アクション)と同じ単位変換で揃える(見た目が一致するように)。
             if (kind == AdjustmentKind::BrightnessContrast) {
                 adjKind[z] = 1;
                 adjParams[z * 4 + 0] = layer.adjustment.brightness / 200.0f;
@@ -231,8 +203,7 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
                 adjParams[z * 4 + 2] = layer.adjustment.yellow  / 100.0f;
             } else if (kind == AdjustmentKind::ToneCurve) {
                 adjKind[z] = 5;
-                // LUTスライスは遅延確保(初回のみ実際に確保が走る)、中身は毎フレーム
-                // 現在のcurvePointsから再構築する(パネルでの編集をそのまま反映するため)。
+                // LUTスライスは遅延確保(初回のみ実際に確保が走る)、中身は毎フレーム現在のcurvePointsから再構築する(パネルでの編集をそのまま反映するため)。
                 if (doc.ensureAdjustmentLutSlice(z)) {
                     quint8 lut[256];
                     ToneCurveMath::buildLut256(layer.adjustment.curvePoints, lut);
@@ -307,15 +278,12 @@ void CanvasCompositor::updateLayerSSBOs(ToolContext &ctx)
     ctx.gl->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 13, ctx.ssboLayerIsSolidColor);
     ctx.gl->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 14, ctx.ssboLayerAdjKind);
     ctx.gl->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 15, ctx.ssboLayerAdjParams);
-    // binding 0はcomposite.comp/render.frag側でテクスチャ/画像用に使われておらず
-    // (SSBOとテクスチャ/画像はバインディング名前空間が別)、4〜15が埋まっている
-    // ため、単色レイヤーの色だけこの空きスロットに割り当てる。
+    // binding 0はcomposite.comp/render.frag側でテクスチャ/画像用に使われておらず(SSBOとテクスチャ/画像はバインディング名前空間が別)、4〜15が埋まっているため、
+    // 単色レイヤーの色だけこの空きスロットに割り当てる。
     ctx.gl->glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx.ssboLayerSolidColor);
 }
 
-// ===========================================================================
-// ナビゲーター用: 全レイヤー合成
-// ===========================================================================
+// ナビゲーター用: 全レイヤー合成。
 void CanvasCompositor::updateCompositedTex(ToolContext &ctx)
 {
     CanvasDocument &doc = *ctx.doc;
@@ -325,7 +293,7 @@ void CanvasCompositor::updateCompositedTex(ToolContext &ctx)
 
     // タイル配列(全バンク)は setLayerUniforms() 内でユニット8..へバインドする(旧: unit1へ単一配列)。
 
-    // compositedTileArr は initTextures() で事前に確保されている前提
+    // compositedTileArr は initTextures() で事前に確保されている前提。
     Q_ASSERT(ctx.compositedTileArr != 0);
 
     updateLayerSSBOs(ctx);
@@ -374,9 +342,7 @@ void CanvasCompositor::updateCompositedTex(ToolContext &ctx)
     ctx.gl->glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-// ===========================================================================
-// プレビュー / 書き出し
-// ===========================================================================
+// プレビュー / 書き出し。
 QImage CanvasCompositor::renderLayerPreview(ToolContext &ctx, int zStart, int zEnd, int size)
 {
     CanvasDocument &doc = *ctx.doc;
@@ -389,8 +355,7 @@ QImage CanvasCompositor::renderLayerPreview(ToolContext &ctx, int zStart, int zE
     if (zStart < 0 || zStart >= count) return blank;
     zEnd = qBound(zStart, zEnd, count - 1);
 
-    // 単一レイヤーのプレビュー(呼び出し元は現状すべてこれ)は、他レイヤーとの合成が
-    // 絡まないため軽量パスで済ませる(下記参照)。
+    // 単一レイヤーのプレビュー(呼び出し元は現状すべてこれ)は、他レイヤーとの合成が絡まないため軽量パスで済ませる(下記参照)。
     if (zStart == zEnd)
         return renderSingleLayerPreviewLight(ctx, zStart, size);
 
@@ -462,10 +427,8 @@ QImage CanvasCompositor::renderLayerPreview(ToolContext &ctx, int zStart, int zE
     ctx.gl->glDeleteTextures(1, &tmpTex);
     ctx.gl->glDeleteTextures(1, &dstTex);
 
-    // layerTexArray/合成結果は事前乗算アルファで格納されているため、まず
-    // Format_RGBA8888_Premultipliedとして正しくタグ付けしてからconvertToFormatで
-    // 非事前乗算(Format_RGBA8888)へ変換する。そのまま Format_RGBA8888 とラベル
-    // 付けすると(実データは事前乗算のまま)半透明ピクセルの色が暗くなってしまう。
+    // layerTexArray/合成結果は事前乗算アルファで格納されているため、まずFormat_RGBA8888_Premultipliedとして正しくタグ付けしてからconvertToFormatで非事前乗算(Format_RGBA8888)
+    // へ変換する。
     QImage img(buf.constData(), size, size, size * 4, QImage::Format_RGBA8888_Premultiplied);
     return img.copy().convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
 }
@@ -522,7 +485,7 @@ QImage CanvasCompositor::renderNavigatorPreview(ToolContext &ctx, int size, bool
 
         const Layer &layer = doc.activeLayer();
         if (layer.layerType == LayerType::SolidColor) {
-            // 単色レイヤーはタイルを持たないので、そのレイヤーの色で塗りつぶすだけでよい
+            // 単色レイヤーはタイルを持たないので、そのレイヤーの色で塗りつぶすだけでよい。
             ctx.gl->glBindFramebuffer(GL_FRAMEBUFFER, midFbo);
             ctx.gl->glClearColor((float)layer.solidColor.redF(), (float)layer.solidColor.greenF(),
                                   (float)layer.solidColor.blueF(), (float)layer.solidColor.alphaF());
@@ -577,9 +540,8 @@ QImage CanvasCompositor::renderMaskPreview(ToolContext &ctx, int layerIndex, int
     int dstW = qMax(1, (int)(ctx.canvasW * scale));
     int dstH = qMax(1, (int)(ctx.canvasH * scale));
 
-    // マスクタイル(キャンバス全体を覆う連続スライス)を一旦キャンバスサイズのFBOへ
-    // 並べ、そこから縮小してdstTexへブリットする(renderNavigatorPreviewの単体レイヤー
-    // パスと同じ手順。マスクはR=G=B=濃度・A=255なので結果はそのままグレースケール)。
+    // マスクタイル(キャンバス全体を覆う連続スライス)を一旦キャンバスサイズのFBOへ並べ、そこから縮小してdstTexへブリットする(renderNavigatorPreviewの単体レイヤーパスと同じ手順。マスクはR=G=B=濃度・A=255な
+    // ので結果はそのままグレースケール)。
     GLuint dstTex = makeTexture2D(ctx.gl, GL_RGBA8, dstW, dstH);
     GLuint midTex = makeTexture2D(ctx.gl, GL_RGBA8, ctx.canvasW, ctx.canvasH);
     GLuint srcFbo = 0, midFbo = 0, dstFbo = 0;
@@ -691,14 +653,7 @@ QImage CanvasCompositor::renderExport(ToolContext &ctx)
     return img.copy().convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
 }
 
-// ===========================================================================
 // 単一レイヤープレビュー(軽量パス)
-// ===========================================================================
-// renderLayerPreview(zStart==zEnd)専用。呼び出し元(LayerDockのサムネイル)は
-// 常に単一レイヤーのみを要求するため、他レイヤーとの合成(クリッピング/ブレンド
-// モード)は一切関与しない。そのレイヤー自身のタイルをlayerTexArrayから直接、
-// 出力サイズ(size x size)へ縮小blitするだけで済ませ、キャンバス全面ぶんの
-// 一時テクスチャ確保やcompute dispatchを回避する。
 QImage CanvasCompositor::renderSingleLayerPreviewLight(ToolContext &ctx, int z, int size)
 {
     CanvasDocument &doc = *ctx.doc;
@@ -709,7 +664,6 @@ QImage CanvasCompositor::renderSingleLayerPreviewLight(ToolContext &ctx, int z, 
     blank.fill(Qt::transparent);
 
     // 単色/調整レイヤー等、実ピクセルを持たないレイヤーは対象外
-    // (呼び出し元のLayerDockはこの関数自体をNormalレイヤーにしか使わないが、念のため)。
     if (layer.tiles.isEmpty() || ctx.canvasW <= 0 || ctx.canvasH <= 0) return blank;
 
     GLuint dstTex = makeTexture2D(ctx.gl, GL_RGBA8, size, size, GL_LINEAR);
@@ -719,7 +673,7 @@ QImage CanvasCompositor::renderSingleLayerPreviewLight(ToolContext &ctx, int z, 
 
     ctx.gl->glBindFramebuffer(GL_FRAMEBUFFER, dstFbo);
     ctx.gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
-    // レイヤーがキャンバスの一部しか覆っていない場合、覆っていない部分は透明のままにする
+    // レイヤーがキャンバスの一部しか覆っていない場合、覆っていない部分は透明のままにする。
     ctx.gl->glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     ctx.gl->glClear(GL_COLOR_BUFFER_BIT);
 
@@ -727,8 +681,6 @@ QImage CanvasCompositor::renderSingleLayerPreviewLight(ToolContext &ctx, int z, 
     ctx.gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
 
     // キャンバス座標系(0..canvasW/H)を出力座標系(0..size)へ写す倍率。
-    // レイヤーの矩形はキャンバスより大きい/はみ出している場合があるが、
-    // glBlitFramebufferの描画先座標がdstTexの範囲外になる部分は自動でクリップされる。
     const float scaleX = (float)size / (float)ctx.canvasW;
     const float scaleY = (float)size / (float)ctx.canvasH;
 
@@ -738,8 +690,7 @@ QImage CanvasCompositor::renderSingleLayerPreviewLight(ToolContext &ctx, int z, 
             const int canvasPxX = (layer.originTx + tx) * tileSize;
             const int canvasPxY = (layer.originTy + ty) * tileSize;
 
-            // floor/ceilで隣接タイルとの間に隙間ができないよう外側に広げて丸める
-            // (境界での1px程度の重なりは軽量プレビューでは無視できる)。
+            // floor/ceilで隣接タイルとの間に隙間ができないよう外側に広げて丸める(境界での1px程度の重なりは軽量プレビューでは無視できる)。
             const int dstX0 = qFloor(canvasPxX * scaleX);
             const int dstY0 = qFloor(canvasPxY * scaleY);
             const int dstX1 = qCeil((canvasPxX + tileSize) * scaleX);
@@ -759,8 +710,6 @@ QImage CanvasCompositor::renderSingleLayerPreviewLight(ToolContext &ctx, int z, 
     ctx.gl->glReadPixels(0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
 
     // レイヤーのopacityは合成シェーダーを経由していないのでここでCPU側から適用する。
-    // layerTexArrayの中身は事前乗算アルファなので、RGBA全チャンネルへ一様に掛ければよい
-    // (composite.compのc.rgb *= opacity; c.a *= opacity; と同じ意味になる)。
     if (layer.opacity < 0.999f) {
         const float op = qBound(0.0f, layer.opacity, 1.0f);
         for (uint8_t &b : buf) b = (uint8_t)(b * op + 0.5f);

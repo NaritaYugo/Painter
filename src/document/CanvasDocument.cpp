@@ -14,18 +14,12 @@ void CanvasDocument::initTileGrid(int canvasW, int canvasH)
     tilesY_ = (canvasH  + TILE_SIZE - 1) / TILE_SIZE;
 }
 
-// ===========================================================================
-// レイヤー操作
-// ===========================================================================
+// レイヤー操作。
 bool CanvasDocument::addLayer(const QString &name, int insertIndex, bool clipping,
                                int originTx, int originTy, int tilesXOverride, int tilesYOverride,
                                LayerType layerType, const QVector<int> &ancestorFolders)
 {
-    // 単色レイヤー/調整レイヤー/フィルターレイヤー/フォルダーはピクセルデータを
-    // 一切持たない(常に0x0、原点も(0,0)固定)。単色レイヤーはシェーダー側で手続き的に
-    // 不透明白として、調整レイヤーとフィルターレイヤーは下のレイヤーの合成結果への
-    // 加工として扱われるためタイルは不要。フォルダーはUI上のマーカーに過ぎず
-    // キャンバスに一切描画されないため同様に不要。
+    // 単色レイヤー/調整レイヤー/フィルターレイヤー/フォルダーはピクセルデータを一切持たない(常に0x0、原点も(0,0)固定)。
     const bool hasNoTiles = (layerType == LayerType::SolidColor || layerType == LayerType::Adjustment
                               || layerType == LayerType::Filter || layerType == LayerType::Folder);
 
@@ -42,7 +36,6 @@ bool CanvasDocument::addLayer(const QString &name, int insertIndex, bool clippin
     layer.layerType = layerType;
 
     // タイルを連番で確保（render.frag の baseSlice + ty*tilesX + tx 計算のため必須）。
-    // タイル数0(単色レイヤー)の場合は確保自体が不要(allocFn_(0)は失敗扱いになるため呼ばない)。
     const int tileCount = w * h;
     if (tileCount > 0) {
         int base = allocFn_(tileCount);
@@ -63,10 +56,7 @@ bool CanvasDocument::addLayer(const QString &name, int insertIndex, bool clippin
     activeLayer_ = at;
     reindexUndoOnInsert(at);
 
-    // ancestorFoldersで渡された各フォルダー(呼び出し側が「atは実際にこのフォルダーの
-    // 中身の範囲内」と保証している)のchildCountを+1する。渡されたインデックスは
-    // すべてatより前(祖先は常に子より前に位置する)なので、挿入によるインデックス
-    // シフトの影響を受けず、そのまま使える。
+    // ancestorFoldersで渡された各フォルダー(呼び出し側が「atは実際にこのフォルダーの中身の範囲内」と保証している)のchildCountを+1する。
     for (int f : ancestorFolders)
         if (f >= 0 && f < layers.size() && f != at)
             layers[f].childCount++;
@@ -81,8 +71,7 @@ bool CanvasDocument::addLayerMask(int layerIndex)
     Layer &layer = layers[layerIndex];
     if (layer.hasMask) return false;
 
-    // マスクは常にキャンバス全体(tilesX_ x tilesY_)を覆う。tiles同様、連続した
-    // スライスブロックとして確保する。
+    // マスクは常にキャンバス全体(tilesX_ x tilesY_)を覆う。
     const int tileCount = tilesX_ * tilesY_;
     if (tileCount <= 0) return false;
     int base = allocFn_(tileCount);
@@ -110,10 +99,8 @@ QVector<QVector<int>> CanvasDocument::computeAncestorFolders() const
         while (p < end) {
             result[p] = stack;
             if (layers[p].layerType == LayerType::Folder) {
-                // childCountがレイヤー配列と矛盾していても配列外へ出ないよう必ず丸める
-                // (他形式からの変換や壊れたファイルで矛盾した値が入りうる。
-                //  本来はsanitizeFolderChildCounts()で読み込み直後に正しておくが、
-                //  ここが落ちると原因追跡が難しい形のクラッシュになるため二重に防ぐ)。
+                // childCountがレイヤー配列と矛盾していても配列外へ出ないよう必ず丸める(他形式からの変換や壊れたファイルで矛盾した値が入りうる。本来はsanitizeFolderChildCounts()で読み込み直後に正しておくが、
+                // ここが落ちると原因追跡が難しい形のクラッシュになるため二重に防ぐ)。
                 const int childEnd = qMin<int>(end, p + 1 + layers[p].childCount);
                 stack.append(p);
                 walk(p + 1, childEnd);
@@ -129,13 +116,6 @@ QVector<QVector<int>> CanvasDocument::computeAncestorFolders() const
 }
 
 // フォルダーのchildCountを、レイヤー配列に対して木構造として成立する値へ丸める。
-//
-// childCountは「自分の直後に何枚が入れ子で続くか」なので、p + 1 + childCount が
-// 親の範囲(最上位ならlayers.size())を超えてはいけない。他形式からの変換
-// (PsdCodec)や壊れたファイルではこの前提が崩れることがあり、そのままだと
-// childCountを使ってindexを進める箇所(computeAncestorFolders、LayerDockの
-// computeRows/afterLayerBlock 等)がすべて配列外アクセスになる。
-// 読み込み直後に一度ここを通すことで、以降のコードは前提を信頼できる。
 void CanvasDocument::sanitizeFolderChildCounts()
 {
     std::function<void(int, int)> fix = [&](int start, int end) {
@@ -265,9 +245,7 @@ void CanvasDocument::invalidateLayerTileUndoHistory(int layerIndex)
 bool CanvasDocument::removeLayer(int layerIndex, const QVector<int> &ancestorFolders, bool includeContents) {
     if (!layerIndexValid(layerIndex)) return false;
 
-    // フォルダーを削除する場合は、その中身(childCount枚)もまとめて1ブロックとして
-    // 削除する(フォルダーだけ消えて中身が孤立する/繰り上がることを避ける)。
-    // includeContents=falseならマーカー1枚だけを対象にする(中身は残す)。
+    // フォルダーを削除する場合は、その中身(childCount枚)もまとめて1ブロックとして削除する(フォルダーだけ消えて中身が孤立する/繰り上がることを避ける)。
     const bool cascade = includeContents && (layers[layerIndex].layerType == LayerType::Folder);
     const int count = cascade ? 1 + layers[layerIndex].childCount : 1;
     if (layers.size() <= count) return false; // ドキュメントに最低1枚は残す
@@ -289,8 +267,7 @@ bool CanvasDocument::removeLayer(int layerIndex, const QVector<int> &ancestorFol
     if (count == 1) {
         reindexUndoOnRemove(layerIndex);
     } else {
-        // 複数枚の一括削除(フォルダー丸ごと)。moveLayerBlock同様の一般化: 削除範囲内の
-        // 履歴は復元不能として破棄し、範囲より後ろはcount分だけ繰り上げる。
+        // 複数枚の一括削除(フォルダー丸ごと)。
         auto fix = [layerIndex, count](QVector<UndoEntry> &stack) {
             for (int i = stack.size() - 1; i >= 0; i--) {
                 UndoEntry &e = stack[i];
@@ -305,9 +282,7 @@ bool CanvasDocument::removeLayer(int layerIndex, const QVector<int> &ancestorFol
         fix(redoStack);
     }
 
-    // ancestorFoldersで渡された各フォルダー(削除対象が実際に属している外側の階層
-    // チェーン)のchildCountを、削除された総枚数ぶん減算する。渡されたインデックスは
-    // すべてlayerIndexより前なので、削除によるインデックスシフトの影響を受けない。
+    // ancestorFoldersで渡された各フォルダー(削除対象が実際に属している外側の階層チェーン)のchildCountを、削除された総枚数ぶん減算する。
     for (int f : ancestorFolders)
         if (f >= 0 && f < layerIndex)
             layers[f].childCount = qMax(0, layers[f].childCount - count);
@@ -347,8 +322,7 @@ bool CanvasDocument::moveLayerBlock(int fromStart, int count, int toIndex)
     toIndex = qBound(0, toIndex, layers.size() - count);
     if (toIndex == fromStart) return true; // 位置が変わらない
 
-    // moveLayer/reindexUndoOnMove と同じ「takeAt+insert」操作を、ブロック全体に
-    // 一般化したもの。ブロック外のインデックスidxの移動後位置を求める。
+    // moveLayer/reindexUndoOnMove と同じ「takeAt+insert」操作を、ブロック全体に一般化したもの。
     auto mapOutside = [fromStart, count, toIndex](int idx) {
         int afterRemoval   = (idx >= fromStart + count) ? idx - count : idx;
         int afterInsertion = (afterRemoval >= toIndex) ? afterRemoval + count : afterRemoval;
@@ -383,7 +357,6 @@ bool CanvasDocument::moveLayerBlock(int fromStart, int count, int toIndex)
     return true;
 }
 
-// ---------------------------------------------------------------------------
 void CanvasDocument::reindexUndoOnInsert(int insertedAt)
 {
     auto fix = [insertedAt](QVector<UndoEntry> &stack) {
@@ -403,9 +376,7 @@ void CanvasDocument::reindexUndoOnRemove(int removedIndex)
             UndoEntry &e = stack[i];
             if (e.kind != UndoKind::LayerTiles) continue;
             if (e.layerIndex == removedIndex) {
-                // 削除されたレイヤー自身の差分は、そのスライスが解放されフリーリストへ
-                // 戻る(=無関係な将来のレイヤーに再利用されうる)ため、復元不能として
-                // 履歴ごと破棄する(残すとUndo適用時に別レイヤーの中身を上書きしうる)。
+                // 削除されたレイヤー自身の差分は、そのスライスが解放されフリーリストへ戻る(=無関係な将来のレイヤーに再利用されうる)ため、復元不能として履歴ごと破棄する(残すとUndo適用時に別レイヤーの中身を上書きしうる)。
                 stack.remove(i);
             } else if (e.layerIndex > removedIndex) {
                 e.layerIndex--;
@@ -418,8 +389,7 @@ void CanvasDocument::reindexUndoOnRemove(int removedIndex)
 
 void CanvasDocument::reindexUndoOnMove(int fromIndex, int toIndex)
 {
-    // activeLayer_の追従ロジック(moveLayer本体)と同じ場合分けを、任意のインデックスに
-    // 一般化したもの(takeAt(fromIndex)+insert(toIndex)という同一の配列操作が対象なので、
+    // activeLayer_の追従ロジック(moveLayer本体)と同じ場合分けを、任意のインデックスに一般化したもの(takeAt(fromIndex)+insert(toIndex)という同一の配列操作が対象なので、
     // 同じ場合分けがそのまま成り立つ)。
     auto remap = [fromIndex, toIndex](int idx) {
         if (idx == fromIndex) return toIndex;
@@ -457,9 +427,7 @@ void CanvasDocument::setLayerOpacity(int i, float v) {
     if (layerIndexValid(i)) { layers[i].opacity = qBound(0.0f, v, 1.0f); notify(ChangeKind::CacheAndNotify); }
 }
 void CanvasDocument::setLayerVisible(int i, bool v) {
-    // opacity/blendMode/clippingと同様、見た目(キャンバスの合成結果)に直接影響する
-    // ため、NotifyOnly(layersChanged()のみ)ではキャンバスが再描画されない。
-    // CacheAndNotifyでupdate()も呼ばせる。
+    // opacity/blendMode/clippingと同様、見た目(キャンバスの合成結果)に直接影響するため、NotifyOnly(layersChanged()のみ)ではキャンバスが再描画されない。
     if (layerIndexValid(i)) { layers[i].visible = v; notify(ChangeKind::CacheAndNotify); }
 }
 void CanvasDocument::setLayerName(int i, const QString &v) {
@@ -472,9 +440,7 @@ void CanvasDocument::setLayerClipping(int i, bool v) {
     if (layerIndexValid(i)) { layers[i].clipping = v; notify(ChangeKind::CacheAndNotify); }
 }
 
-// ===========================================================================
-// アクティブ状態
-// ===========================================================================
+// アクティブ状態。
 void CanvasDocument::setActiveLayer(int i) {
     if (!layerIndexValid(i)) return;
     activeLayer_ = i;
@@ -488,9 +454,7 @@ const Layer &CanvasDocument::activeLayer() const {
     return layers[activeLayer_];
 }
 
-// ===========================================================================
 // Undo / Redo
-// ===========================================================================
 void CanvasDocument::pushUndo(const UndoEntry &entry) {
     undoStack.push_back(entry);
     if (undoStack.size() > maxUndo_)
@@ -510,9 +474,8 @@ UndoEntry CanvasDocument::applyUndo(const UndoEntry &current) {
     if (entry.kind == UndoKind::CanvasResize || entry.kind == UndoKind::Selection
         || entry.kind == UndoKind::LayerAdd || entry.kind == UndoKind::LayerRemove
         || entry.kind == UndoKind::LayerMerge) {
-        // CanvasResize / Selection / LayerAdd は変更前後を自己完結して持っているため、
-        // currentは使わずエントリ自身をそのままredoStackへ積む
-        // (redo時にafter側 = LayerAddならレイヤーを作り直す側を使えばよい)。
+        // CanvasResize / Selection / LayerAdd は変更前後を自己完結して持っているため、currentは使わずエントリ自身をそのままredoStackへ積む(redo時にafter側 =
+        // LayerAddならレイヤーを作り直す側を使えばよい)。
         redoStack.push_back(entry);
         if (redoStack.size() > maxUndo_)
             redoStack.removeFirst();
@@ -523,9 +486,7 @@ UndoEntry CanvasDocument::applyUndo(const UndoEntry &current) {
     redoStack.push_back(current);
     if (redoStack.size() > maxUndo_)
         redoStack.removeFirst();
-    // reindexUndoOnRemove/Insert/Move で通常は常に有効な範囲に保たれるはずだが、
-    // 万一の不整合でも layers[] への範囲外アクセス(クラッシュ)だけは起こさないよう
-    // 防御的にクランプする。
+    // reindexUndoOnRemove/Insert/Move で通常は常に有効な範囲に保たれるはずだが、万一の不整合でも layers[] への範囲外アクセス(クラッシュ)だけは起こさないよう防御的にクランプする。
     activeLayer_ = qBound(0, entry.layerIndex, layers.size() - 1);
     modifiedCount_--;
     return entry;
@@ -552,7 +513,7 @@ UndoEntry CanvasDocument::applyRedo(const UndoEntry &current) {
 
 void CanvasDocument::resetToBlank()
 {
-    // 全レイヤーのタイルスライスを解放
+    // 全レイヤーのタイルスライスを解放。
     for (const Layer &layer : layers)
         for (const auto &row : layer.tiles)
             for (int si : row)
@@ -563,6 +524,5 @@ void CanvasDocument::resetToBlank()
     redoStack.clear();
     activeLayer_    = 0;
     modifiedCount_  = 0;
-    // allocFn_ / freeFn_ / onChanged はそのまま維持する
-    // (呼び出し側が新しいレイヤーを作るのはこのメソッドの後の責務)
+    // allocFn_ / freeFn_ / onChanged はそのまま維持する。
 }

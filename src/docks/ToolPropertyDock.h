@@ -20,9 +20,9 @@ class QCheckBox;
 // ===========================================================================
 // ツール設定の項目定義
 // ---------------------------------------------------------------------------
-// 設定項目は「まず SettingId として1つ定義し、ToolPropDock::buildSetting() に
+// 設定項目は「まず SettingId として1つ定義し、ToolPropertyDock::buildSetting() に
 // 作り方を1ケース書く」→「どのツールのどのセクションに出すかを kToolPages
-// (ToolPropDock.cpp)の表へ並べるだけ」で追加できるようにしてある。
+// (ToolPropertyDock.cpp)の表へ並べるだけ」で追加できるようにしてある。
 //
 // 以前はページ生成関数の中で if (isPen || isEraser || isBlur ...) を項目ごとに
 // 書き並べていたため、ツールを増やすたびに全条件式へ手を入れる必要があり、
@@ -30,12 +30,12 @@ class QCheckBox;
 //
 // 新しい設定項目を足す手順:
 //   1. SettingId に値を足す
-//   2. ToolPropDock::buildSetting() の switch に1ケース足す
-//      (サイズ等、複数ツールが同名で持つ値なら ToolPropDock.cpp 冒頭の
+//   2. ToolPropertyDock::buildSetting() の switch に1ケース足す
+//      (サイズ等、複数ツールが同名で持つ値なら ToolPropertyDock.cpp 冒頭の
 //       アクセスヘルパーにも1つ足す)
 //   3. kToolPages の該当ツールのセクションへ SettingId を並べる
 // ===========================================================================
-namespace ToolProp {
+namespace ToolProperty {
 
 enum class SettingId {
     // ブラシ系(複数ツールが共通で持つ)
@@ -124,19 +124,19 @@ struct ToolPageDef {
     QVector<SectionDef> sections;
 };
 
-} // namespace ToolProp
+} // namespace ToolProperty
 
 // ===========================================================================
-// ToolPropDock  ―  選択中ツールに応じて設定項目を切り替えるパネル
+// ToolPropertyDock  ―  選択中ツールに応じて設定項目を切り替えるパネル
 //
 // ToolDockWidget::toolChanged シグナルを受けて setCurrentTool() を呼ぶ。
 // ページは ToolType ごとに1枚で、QStackedWidget のインデックス＝(int)ToolType。
 // ===========================================================================
-class ToolPropDock : public QWidget
+class ToolPropertyDock : public QWidget
 {
     Q_OBJECT
 public:
-    explicit ToolPropDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent = nullptr);
+    explicit ToolPropertyDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent = nullptr);
 
     void setCurrentTool(ToolType tool);
     void refreshFromSettings();
@@ -152,7 +152,7 @@ private:
     // ---- ページ/項目の生成 ------------------------------------------------
     QWidget *makeToolPage(ToolType tool);
     // 設定項目1つぶんのウィジェットを layout へ足す。
-    void buildSetting(ToolProp::SettingId id, ToolType tool, QWidget *page, QVBoxLayout *layout);
+    void buildSetting(ToolProperty::SettingId id, ToolType tool, QWidget *page, QVBoxLayout *layout);
 
     // ---- 汎用の行ヘルパー --------------------------------------------------
     // どれも「ラベル + スライダー + 現在値ラベル」の1行を作り、値の反映と

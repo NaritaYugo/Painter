@@ -17,7 +17,7 @@ class QPushButton;
 class ToneCurveEditor;
 
 // ---------------------------------------------------------------------------
-// SettingsDlg
+// SettingsDialog
 //
 // 左にカテゴリ一覧、右に詳細設定を表示する一般的な設定ウィンドウ。
 // QSettings を使って永続化する。
@@ -25,11 +25,11 @@ class ToneCurveEditor;
 // 「保存して閉じる」で確定、「キャンセル」で変更を捨てて閉じる。
 // 値は OK 時にまとめて QSettings に書き込む (即時反映はしない設計)。
 // ---------------------------------------------------------------------------
-class SettingsDlg : public QDialog
+class SettingsDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit SettingsDlg(QWidget *parent = nullptr);
+    explicit SettingsDialog(QWidget *parent = nullptr);
 
     // QSettings から設定値を読み込んで返すための静的ヘルパー群
     // (アプリ起動時に MainWindow 側から呼んで初期値を取得する用)

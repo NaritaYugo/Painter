@@ -63,7 +63,7 @@ inline QColor hintText;
 inline QColor errorText;
 
 // ---- 市松模様(透過部分を示すチェッカーパターン) -------------------------------
-// 先端画像プレビュー(ToolPropDock)・レイヤープレビュー(LayerDock)・キャンバス
+// 先端画像プレビュー(ToolPropertyDock)・レイヤープレビュー(LayerDock)・キャンバス
 // 背景(render.frag)の3箇所で共通して使う。両テーマ共通の固定色にしてあるので、
 // ここの2値を変えるだけで全箇所に反映される。
 inline const QColor checkerDark  = QColor(0xcc, 0xcc, 0xcc);

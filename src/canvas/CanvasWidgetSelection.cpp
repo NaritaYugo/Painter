@@ -54,7 +54,6 @@ QByteArray CanvasWidget::captureSelectionMask()
 {
     if (selectionMaskTex == 0 || canvasW <= 0 || canvasH <= 0) return QByteArray();
     // 選択マスクはcompute shaderのimageStoreでも書かれる(変形の焼き込み等)。
-    // 読み戻しの前にバリア+完了待ちが必要(SelectTool::finishPenSelectの詳しいコメント参照)。
     glMemoryBarrier(GL_ALL_BARRIER_BITS);
     glFinish();
 
@@ -64,8 +63,7 @@ QByteArray CanvasWidget::captureSelectionMask()
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, buf.data());
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
     glBindTexture(GL_TEXTURE_2D, 0);
-    // ここでは圧縮しない(生データを返す)。圧縮はcommit時に「実際に変わった矩形」
-    // だけに対して行うので、全域2MBを毎回圧縮する必要がなくなった。
+    // ここでは圧縮しない(生データを返す)。
     return QByteArray(reinterpret_cast<const char *>(buf.constData()), buf.size());
 }
 
@@ -109,8 +107,7 @@ void CanvasWidget::commitSelectionUndo(const QByteArray &afterRaw, int x, int y,
     if (x < 0 || y < 0 || x + w > canvasW || y + h > canvasH) return;
     if (pendingSelectionUndoBefore_.size() != (qsizetype)canvasW * canvasH) return;
 
-    // 呼び出し側が「貼ったばかりの矩形のマスク」を持っているならそれを使い、
-    // 無ければGPUから読み戻す(読み戻しは重いので基本は前者を使う)。
+    // 呼び出し側が「貼ったばかりの矩形のマスク」を持っているならそれを使い、無ければGPUから読み戻す(読み戻しは重いので基本は前者を使う)。
     QByteArray afterRect = afterRaw;
     if (afterRect.size() != (qsizetype)w * h) {
         makeCurrent();
@@ -122,21 +119,20 @@ void CanvasWidget::commitSelectionUndo(const QByteArray &afterRaw, int x, int y,
                    full.constData() + (qsizetype)(y + r) * canvasW + x, w);
     }
 
-    // 「変更前」も同じ矩形だけ切り出す。全域を持つのではなく矩形だけにすることで、
-    // 圧縮コストもメモリも「実際に編集した面積」に比例するようになる。
+    // 「変更前」も同じ矩形だけ切り出す。
     QByteArray beforeRect((qsizetype)w * h, Qt::Uninitialized);
     for (int r = 0; r < h; r++)
         memcpy(beforeRect.data() + (qsizetype)r * w,
                pendingSelectionUndoBefore_.constData() + (qsizetype)(y + r) * canvasW + x, w);
 
-    // 中身も選択状態も変わっていなければ履歴を汚さない
+    // 中身も選択状態も変わっていなければ履歴を汚さない。
     if (beforeRect == afterRect && hasSelection_ == pendingSelectionUndoHadSel_) return;
 
     UndoEntry entry;
     entry.kind = UndoKind::Selection;
     entry.selection.rectX = x; entry.selection.rectY = y;
     entry.selection.rectW = w; entry.selection.rectH = h;
-    // レベル1で十分縮む(0/255が塊で続くデータ)。矩形だけなので元々小さい。
+    // レベル1で十分縮む(0/255が塊で続くデータ)。
     entry.selection.beforeMask = qCompress(reinterpret_cast<const uchar *>(beforeRect.constData()),
                                             beforeRect.size(), 1);
     entry.selection.afterMask  = qCompress(reinterpret_cast<const uchar *>(afterRect.constData()),
@@ -178,7 +174,7 @@ void CanvasWidget::clearSelection()
         hasSelection_ = false;
         emit selectionChanged(false);
     }
-    // 貼ったばかりのマスク(全域255)をそのまま渡して読み戻しを1回省く
+    // 貼ったばかりのマスク(全域255)をそのまま渡して読み戻しを1回省く。
     commitSelectionUndo(QByteArray(reinterpret_cast<const char *>(fullSel.constData()), fullSel.size()),
                         0, 0, canvasW, canvasH);
     update();
@@ -190,9 +186,7 @@ void CanvasWidget::selectAll()
     makeCurrent();
     beginSelectionUndo();
 
-    // clearSelection()と同じ「全域255」のマスクを敷く。選択範囲マスク自体が
-    // キャンバスサイズなので、レイヤーがキャンバスよりはみ出ていてもその部分は
-    // 選択されない(=キャンバス範囲のみを選択したことになる)。
+    // clearSelection()と同じ「全域255」のマスクを敷く。
     QVector<uint8_t> fullSel(canvasW * canvasH, 255);
     glBindTexture(GL_TEXTURE_2D, selectionMaskTex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -207,7 +201,7 @@ void CanvasWidget::selectAll()
         hasSelection_ = true;
         emit selectionChanged(true);
     }
-    // 貼ったばかりのマスク(全域255)をそのまま渡して読み戻しを1回省く
+    // 貼ったばかりのマスク(全域255)をそのまま渡して読み戻しを1回省く。
     commitSelectionUndo(QByteArray(reinterpret_cast<const char *>(fullSel.constData()), fullSel.size()),
                         0, 0, canvasW, canvasH);
     update();
@@ -249,7 +243,7 @@ void CanvasWidget::copySelection()
         if (maxX < minX) return; // 選択範囲が空
         rectX = minX; rectY = minY; rectW = maxX - minX + 1; rectH = maxY - minY + 1;
     } else {
-        // レイヤーの全内容(キャンバス外にはみ出た部分も含む)
+        // レイヤーの全内容(キャンバス外にはみ出た部分も含む)。
         rectX = activeLayer.originTx * TILE_SIZE;
         rectY = activeLayer.originTy * TILE_SIZE;
         rectW = activeLayer.tilesX() * TILE_SIZE;
@@ -281,7 +275,7 @@ void CanvasWidget::copySelection()
     }
 
     if (hasSelection_) {
-        // 選択範囲の形状でマスクする(bbox内でも非選択部分は透過にする)
+        // 選択範囲の形状でマスクする(bbox内でも非選択部分は透過にする)。
         for (int y = 0; y < rectH; y++) {
             uchar *row = img.scanLine(y);
             const uint8_t *maskRow = maskBuf.constData() + (size_t)(y + rectY) * canvasW + rectX;
@@ -291,10 +285,8 @@ void CanvasWidget::copySelection()
         }
     }
 
-    // タイル格納の行順(原点左下・Y上向き)を、標準画像/OSクリップボードが期待する
-    // 行順(原点左上・Y下向き)へ変換してからクリップボードへ渡す
-    // (loadImageAsSingleLayer等と対の反転。ここが無いとソフト外へコピーした画像や
-    // ソフト外からの貼り付けが上下逆になる)。
+    // タイル格納の行順(原点左下・Y上向き)を、標準画像/OSクリップボードが期待する行順(原点左上・Y下向き)へ変換してからクリップボードへ渡す(loadImageAsSingleLayer等と対の反転。ここが無いとソフト外へコピーした画像やソフ
+    // ト外からの貼り付けが上下逆になる)。
     img = img.mirrored(false, true);
 
     QMimeData *mime = new QMimeData();
@@ -313,10 +305,7 @@ void CanvasWidget::pasteClipboard()
 
     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
     if (!mime || !mime->hasImage()) return;
-    // 標準画像/OSクリップボードの行順(原点左上・Y下向き)を、タイル格納が期待する
-    // 行順(原点左下・Y上向き)へ変換する(loadImageAsSingleLayer等と対の反転。
-    // これが無いとソフト外からの貼り付けが上下逆になる)。copySelection()側も
-    // 対称に反転しているので、本ソフト内でのコピー&ペーストは従来通り正しい向き。
+    // 標準画像/OSクリップボードの行順(原点左上・Y下向き)を、タイル格納が期待する行順(原点左下・Y上向き)へ変換する(loadImageAsSingleLayer等と対の反転。これが無いとソフト外からの貼り付けが上下逆になる)。
     const QImage img = qvariant_cast<QImage>(mime->imageData()).convertToFormat(QImage::Format_RGBA8888_Premultiplied).mirrored(false, true);
     if (img.isNull() || img.width() <= 0 || img.height() <= 0) return;
 
@@ -331,7 +320,7 @@ void CanvasWidget::pasteClipboard()
         }
     }
     if (!hasOrigin) {
-        // 外部由来の画像等、コピー元位置が無い場合はキャンバス中央へ貼り付ける
+        // 外部由来の画像等、コピー元位置が無い場合はキャンバス中央へ貼り付ける。
         pasteX = (canvasW - img.width()) / 2;
         pasteY = (canvasH - img.height()) / 2;
     }
@@ -347,7 +336,7 @@ void CanvasWidget::pasteClipboard()
     const Layer &layer = doc_->layerRef(layerIndex);
 
     beginStrokeUndo();
-    // 貼り付けで実際に書き換えるタイルの範囲だけをUndo対象にする
+    // 貼り付けで実際に書き換えるタイルの範囲だけをUndo対象にする。
     const int touchTxMin = qMax(minTx, layer.originTx);
     const int touchTyMin = qMax(minTy, layer.originTy);
     const int touchTxMax = qMin(maxTxEx - 1, layer.originTx + layer.tilesX() - 1);
@@ -370,7 +359,7 @@ void CanvasWidget::pasteClipboard()
             for (int y = oy0; y < oy1; y++) {
                 const uchar *srcRow = img.constScanLine(y - pasteY) + (ox0 - pasteX) * 4;
                 uchar *dstRow = reinterpret_cast<uchar*>(buf.data()) + ((y - tilePxY) * TILE_SIZE + (ox0 - tilePxX)) * 4;
-                // 通常のアルファ合成(Source Over、プリマル済みRGBA前提)で貼り付ける
+                // 通常のアルファ合成(Source Over、プリマル済みRGBA前提)で貼り付ける。
                 for (int x = 0; x < ox1 - ox0; x++) {
                     const uchar sa = srcRow[x * 4 + 3];
                     if (sa == 255) { memcpy(dstRow + x * 4, srcRow + x * 4, 4); continue; }
@@ -390,11 +379,4 @@ void CanvasWidget::pasteClipboard()
     update();
 }
 
-// ===========================================================================
 // 拡大・縮小・回転 / 自由変形(アクション)
-// ---------------------------------------------------------------------------
-// 実体は src/actions/TransformActions.h の TransformAction/FreeTransformAction へ
-// 移動した。ここに残るのはメニュー/ショートカットの入口(他アクションを畳んでから
-// controller.start() するだけ)。確定/キャンセルは confirmActiveAction()/
-// cancelActiveAction() に集約された(ヘッダで直接 actions_.confirmActive() 等へ転送)。
-// ===========================================================================

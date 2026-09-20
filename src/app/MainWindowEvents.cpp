@@ -3,7 +3,7 @@
 #include "docks/LayerDock.h"
 #include "docks/ColorCircleDock.h"
 #include "docks/ToolDock.h"
-#include "docks/ToolPropDock.h"
+#include "docks/ToolPropertyDock.h"
 #include "docks/ToolPresetDock.h"
 #include "docks/BrushSizeDock.h"
 #include "docks/NavigatorDock.h"
@@ -17,7 +17,7 @@
 #include "document/RecentFiles.h"
 #include "io/AbrCodec.h"
 #include "io/AbrPenMapping.h"
-#include "dialogs/CalibrationDlg.h"
+#include "dialogs/CalibrationDialog.h"
 
 #include <QScreen>
 #include <QShowEvent>

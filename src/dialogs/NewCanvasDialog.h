@@ -11,11 +11,11 @@ class QLabel;
 class QCheckBox;
 class CanvasPreviewWidget;
 
-class NewCanvasDlg : public QDialog
+class NewCanvasDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit NewCanvasDlg(QWidget *parent = nullptr);
+    explicit NewCanvasDialog(QWidget *parent = nullptr);
 
     int canvasWidth() const;
     int canvasHeight() const;

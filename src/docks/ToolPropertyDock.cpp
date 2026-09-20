@@ -1,4 +1,4 @@
-#include "docks/ToolPropDock.h"
+#include "docks/ToolPropertyDock.h"
 #include "components/CollapsibleSection.h"
 #include "components/ThemeColors.h"
 #include "document/BlendModeList.h"
@@ -27,9 +27,9 @@
 #include <QPainter>
 #include <QSettings>
 
-using ToolProp::SettingId;
-using ToolProp::SectionDef;
-using ToolProp::ToolPageDef;
+using ToolProperty::SettingId;
+using ToolProperty::SectionDef;
+using ToolProperty::ToolPageDef;
 
 // ===========================================================================
 // 画像(先端画像・紙質テクスチャ)のプレビュー用ボタン
@@ -387,6 +387,7 @@ static const QVector<SectionDef> &sectionsForTool(ToolType tool)
 // セクションの開閉状態を保存するキー。ツールごとに独立させる。
 static QString sectionSettingsKey(ToolType tool, const QString &sectionId)
 {
+    // 既存ユーザーの開閉状態を引き継ぐため、QSettings上の旧キー名は変更しない。
     return QStringLiteral("toolProp/sections/%1/%2")
         .arg(toolTypeSettingsKey(tool), sectionId);
 }
@@ -394,7 +395,7 @@ static QString sectionSettingsKey(ToolType tool, const QString &sectionId)
 // ===========================================================================
 // コンストラクタ
 // ===========================================================================
-ToolPropDock::ToolPropDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent)
+ToolPropertyDock::ToolPropertyDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *parent)
     : QWidget(parent), glWidget(gl), toolCfg_(toolCfg)
 {
     auto *vLayout = new QVBoxLayout(this);
@@ -417,7 +418,7 @@ ToolPropDock::ToolPropDock(CanvasWidget *gl, ToolConfig *toolCfg, QWidget *paren
 }
 
 // ===========================================================================
-void ToolPropDock::setCurrentTool(ToolType tool)
+void ToolPropertyDock::setCurrentTool(ToolType tool)
 {
     const int index = (int)tool;
     stack->setCurrentIndex(index);
@@ -436,13 +437,13 @@ void ToolPropDock::setCurrentTool(ToolType tool)
         w->adjustSize();
 }
 
-void ToolPropDock::refreshFromSettings()
+void ToolPropertyDock::refreshFromSettings()
 {
     for (auto &fn : refreshFns)
         fn();
 }
 
-void ToolPropDock::setCanvasWidget(CanvasWidget *gl)
+void ToolPropertyDock::setCanvasWidget(CanvasWidget *gl)
 {
     QObject::disconnect(selectionChangedConn_);
     glWidget = gl;
@@ -456,7 +457,7 @@ void ToolPropDock::setCanvasWidget(CanvasWidget *gl)
     refreshFromSettings();
 }
 
-void ToolPropDock::syncSize(int px)
+void ToolPropertyDock::syncSize(int px)
 {
     const int index = stack->currentIndex();
     if (auto *s = m_sizeSliders.value(index, nullptr)) {
@@ -470,7 +471,7 @@ void ToolPropDock::syncSize(int px)
 // ===========================================================================
 // 汎用の行ヘルパー
 // ===========================================================================
-QSlider *ToolPropDock::makeSlider(QWidget *parent, int min, int max, int val)
+QSlider *ToolPropertyDock::makeSlider(QWidget *parent, int min, int max, int val)
 {
     auto *s = new QSlider(Qt::Horizontal, parent);
     s->setRange(min, max);
@@ -478,7 +479,7 @@ QSlider *ToolPropDock::makeSlider(QWidget *parent, int min, int max, int val)
     return s;
 }
 
-ToolPropDock::SliderRow ToolPropDock::addSliderRow(
+ToolPropertyDock::SliderRow ToolPropertyDock::addSliderRow(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     int sliderMin, int sliderMax,
     std::function<int()> sliderFromConfig,
@@ -512,7 +513,7 @@ ToolPropDock::SliderRow ToolPropDock::addSliderRow(
     return { slider, value };
 }
 
-ToolPropDock::SliderRow ToolPropDock::addPercentRow(
+ToolPropertyDock::SliderRow ToolPropertyDock::addPercentRow(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     std::function<float()> get, std::function<void(float)> set)
 {
@@ -522,7 +523,7 @@ ToolPropDock::SliderRow ToolPropDock::addPercentRow(
                         [](int v) { return QStringLiteral("%1%").arg(v); });
 }
 
-ToolPropDock::SliderRow ToolPropDock::addIntRow(
+ToolPropertyDock::SliderRow ToolPropertyDock::addIntRow(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     int minV, int maxV, const QString &suffix,
     std::function<int()> get, std::function<void(int)> set)
@@ -532,7 +533,7 @@ ToolPropDock::SliderRow ToolPropDock::addIntRow(
                         [suffix](int v) { return QStringLiteral("%1%2").arg(v).arg(suffix); });
 }
 
-ToolPropDock::SliderRow ToolPropDock::addLogIntRow(
+ToolPropertyDock::SliderRow ToolPropertyDock::addLogIntRow(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     int minV, int maxV, const QString &suffix,
     std::function<int()> get, std::function<void(int)> set)
@@ -546,7 +547,7 @@ ToolPropDock::SliderRow ToolPropDock::addLogIntRow(
                         });
 }
 
-QCheckBox *ToolPropDock::addCheckRow(
+QCheckBox *ToolPropertyDock::addCheckRow(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     std::function<bool()> get, std::function<void(bool)> set)
 {
@@ -562,7 +563,7 @@ QCheckBox *ToolPropDock::addCheckRow(
     return check;
 }
 
-void ToolPropDock::addComboRow(
+void ToolPropertyDock::addComboRow(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     const QVector<QPair<QString, int>> &items,
     std::function<int()> get, std::function<void(int)> set)
@@ -593,7 +594,7 @@ void ToolPropDock::addComboRow(
     });
 }
 
-void ToolPropDock::addRadio2Row(
+void ToolPropertyDock::addRadio2Row(
     QWidget *page, QVBoxLayout *layout, const QString &label,
     const QString &labelFalse, const QString &labelTrue,
     std::function<bool()> get, std::function<void(bool)> set)
@@ -627,7 +628,7 @@ void ToolPropDock::addRadio2Row(
 // ---------------------------------------------------------------------------
 // ここに1ケース書けば、あとは kToolPages の表に並べるだけでどのツールにも出せる。
 // ===========================================================================
-void ToolPropDock::buildSetting(SettingId id, ToolType tool, QWidget *page, QVBoxLayout *layout)
+void ToolPropertyDock::buildSetting(SettingId id, ToolType tool, QWidget *page, QVBoxLayout *layout)
 {
     ToolConfig &cfg = *toolCfg_;
 
@@ -1242,7 +1243,7 @@ void ToolPropDock::buildSetting(SettingId id, ToolType tool, QWidget *page, QVBo
 // ===========================================================================
 // ツール1つぶんのページ
 // ===========================================================================
-QWidget *ToolPropDock::makeToolPage(ToolType tool)
+QWidget *ToolPropertyDock::makeToolPage(ToolType tool)
 {
     auto *page    = new QWidget();
     auto *vLayout = new QVBoxLayout(page);

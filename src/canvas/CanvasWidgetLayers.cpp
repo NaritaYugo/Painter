@@ -50,15 +50,7 @@
 
 // Layer/resource operations and layer-oriented editing.
 
-// ===========================================================================
 // レイヤー統合(mergeLayers)用のCPU側ブレンド計算
-//
-// resources/shaders/header/common.glsl のブレンドモード計算と同じ式を
-// CPU(pre-multiplied alpha, float)で再現したもの。タイル1枚ぶんの
-// RGBA8ピクセル列に対してCPUでまとめて計算し、layerTexArrayへ書き戻す
-// (頻度が低い操作なのでコンピュートシェーダ化はせず、既存の
-//  readSlicePixels/writeSlicePixels を使って完結させる)。
-// ===========================================================================
 namespace {
 
 struct PremulColor { float r, g, b, a; };
@@ -117,8 +109,7 @@ PremulColor overlayBlendCpu(const PremulColor &bg, const PremulColor &fg) {
         overlayChannelCpu(bgr, fgr), overlayChannelCpu(bgg, fgg), overlayChannelCpu(bgb, fgb));
 }
 
-// resources/shaders/header/common.glsl のPhotoshop全ブレンドモード追加分と同じ式を
-// CPU(pre-multiplied alpha, float)で再現したもの。GLSL側のchannel関数と1対1対応。
+// resources/shaders/header/common.glsl のPhotoshop全ブレンドモード追加分と同じ式をCPU(pre-multiplied alpha, float)で再現したもの。
 
 float darkenChannelCpu(float bg, float fg) { return qMin(bg, fg); }
 PremulColor darkenBlendCpu(const PremulColor &bg, const PremulColor &fg) {
@@ -274,7 +265,7 @@ PremulColor divideBlendCpu(const PremulColor &bg, const PremulColor &fg) {
         divideChannelCpu(bgr, fgr), divideChannelCpu(bgg, fgg), divideChannelCpu(bgb, fgb));
 }
 
-// Photoshop仕様の非線形Lum/Sat(resources/shaders/header/common.glslのhslSetLum等と同一)
+// Photoshop仕様の非線形Lum/Sat(resources/shaders/header/common.glslのhslSetLum等と同一)。
 float hslLumCpu(float r, float g, float b) { return 0.3f * r + 0.59f * g + 0.11f * b; }
 float hslSatCpu(float r, float g, float b) { return qMax(qMax(r, g), b) - qMin(qMin(r, g), b); }
 
@@ -354,7 +345,7 @@ PremulColor luminosityBlendCpu(const PremulColor &bg, const PremulColor &fg) {
     return compositeBlendCpu(bg, fg, br, bgc, bb);
 }
 
-// resources/shaders/header/common.glsl の blendPseudoRand と同じハッシュ関数
+// resources/shaders/header/common.glsl の blendPseudoRand と同じハッシュ関数。
 float blendPseudoRandCpu(float x, float y) {
     float s = std::sin(x * 12.9898f + y * 78.233f) * 43758.5453123f;
     return s - std::floor(s);
@@ -398,8 +389,6 @@ PremulColor applyBlendCpu(const PremulColor &bg, const PremulColor &fg, BlendMod
 }
 
 // survivor(bg)にvictim(fg)をvictim自身のopacity/clipping/blendModeで焼き込む。
-// survivor側のopacityも同時に焼き込まれる(呼び出し側でsurvivorのopacityは
-// 1.0にリセットすること)。
 QByteArray mergeTilePixelsCpu(const QByteArray &survivorRaw, const QByteArray &victimRaw,
                                float survivorOpacity, float victimOpacity,
                                bool victimClipping, BlendMode victimMode,
@@ -419,7 +408,7 @@ QByteArray mergeTilePixelsCpu(const QByteArray &survivorRaw, const QByteArray &v
         fg.r *= victimOpacity;   fg.g *= victimOpacity;   fg.b *= victimOpacity;   fg.a *= victimOpacity;
 
         if (victimClipping) {
-            // 直近の非クリッピングレイヤー(≒結合先)のアルファでマスクする近似
+            // 直近の非クリッピングレイヤー(≒結合先)のアルファでマスクする近似。
             float clip = bg.a;
             fg.r *= clip; fg.g *= clip; fg.b *= clip; fg.a *= clip;
         }
@@ -438,8 +427,7 @@ bool CanvasWidget::addLayer(const QString &name, int insertIndex, bool clipping,
                          int originTx, int originTy, int tilesXOverride, int tilesYOverride,
                          LayerType layerType, const QVector<int> &ancestorFolders)
 {
-    // テクスチャのゼロクリアが終わるまでdoc_の自動通知を一時的に抑制する
-    // (先に通知が飛ぶと、新レイヤーの中身が未初期化のまま合成されてしまうため)
+    // テクスチャのゼロクリアが終わるまでdoc_の自動通知を一時的に抑制する。
     m_suppressDocNotify = true;
     bool ok = doc_->addLayer(name, insertIndex, clipping, originTx, originTy, tilesXOverride, tilesYOverride,
                               layerType, ancestorFolders);
@@ -448,16 +436,6 @@ bool CanvasWidget::addLayer(const QString &name, int insertIndex, bool clipping,
     if (!ok) return false;
 
     // 新規レイヤーの全タイルをゼロクリアする(単色レイヤーはタイルを持たないので何もしない)。
-    // m_initializing中(initTextures()からの初期デフォルトレイヤー作成)でも必ず行う。
-    // 「新規glTexStorage3Dはドライバがゼロ初期化してくれる」という前提に頼っていたが、
-    // 複数タブ化により同一プロセス内でinitTextures()が複数回(タブごとに)呼ばれるようになり、
-    // 直前にfreeTextures()で解放した直後の再確保では、解放前の中身が残った同一メモリが
-    // 返ってくることがあり、この前提はもう成り立たない。
-    // CPU側でゼロ埋めバッファを都度アップロードする(glTexSubImage3D、タイル1枚あたり
-    // TILE_SIZE*TILE_SIZE*4バイトのCPU→GPU転送)のではなく、compute shader
-    // (layerclear.comp)でGPU側から直接書き込む。レイヤーのタイルは常に連続した
-    // スライス範囲として確保される(CanvasDocument::addLayer参照)ため、1回のディスパッチ
-    // (z=タイル数)でまとめてクリアできる。
     const Layer &layer = doc_->activeLayer();
     if (!layer.tiles.isEmpty()) {
         const int base  = layer.tiles[0][0];
@@ -493,9 +471,7 @@ bool CanvasWidget::addLayerMask(int layerIndex)
     makeCurrent();
     if (!doc_->addLayerMask(layerIndex)) return false;
 
-    // 新規マスクは白(=全面表示)でクリアする(addLayer()の透明クリアと同じ仕組み、
-    // 色だけ違う)。マスクは常にキャンバス全体を覆う連続スライスブロックなので
-    // レイヤー本体と同様1回のディスパッチでまとめてクリアできる。
+    // 新規マスクは白(=全面表示)でクリアする(addLayer()の透明クリアと同じ仕組み、色だけ違う)。
     const Layer &layer = doc_->layers[layerIndex];
     const int base  = layer.maskTiles[0][0];
     const int count = layer.maskTilesX() * layer.maskTilesY();
@@ -526,9 +502,7 @@ void CanvasWidget::setEditingMaskLayer(int layerIndex)
     if (!doc_) return;
     const int newVal = (editingMaskLayerIndex_ == layerIndex) ? -1 : layerIndex;
 
-    // これまで編集していたマスクを自分で自動生成していて、一度も描かれていなければ
-    // (一律の不透明度で足りるので)破棄して数値管理へ戻す。別レイヤーへ切り替える
-    // ときも同様に後始末する。
+    // これまで編集していたマスクを自分で自動生成していて、一度も描かれていなければ(一律の不透明度で足りるので)破棄して数値管理へ戻す。
     const int prev = editingMaskLayerIndex_;
     if (prev >= 0 && prev == autoCreatedMaskLayer_ && prev != newVal) {
         if (prev < doc_->layerCount() && doc_->layers[prev].hasMask
@@ -540,8 +514,7 @@ void CanvasWidget::setEditingMaskLayer(int layerIndex)
 
     editingMaskLayerIndex_ = newVal;
 
-    // 編集モードに入ったのにマスクがまだ無ければ、描画先として白マスクを自動生成する
-    // (「クリックで編集開始→そのまま描ける」を成立させるため)。
+    // 編集モードに入ったのにマスクがまだ無ければ、描画先として白マスクを自動生成する(「クリックで編集開始→そのまま描ける」を成立させるため)。
     if (editingMaskLayerIndex_ >= 0 && editingMaskLayerIndex_ < doc_->layerCount()
             && !doc_->layers[editingMaskLayerIndex_].hasMask) {
         if (addLayerMask(editingMaskLayerIndex_))
@@ -554,13 +527,7 @@ void CanvasWidget::setEditingMaskLayer(int layerIndex)
     update();
 }
 
-// ===========================================================================
 // ストローク色バッファ
-// ---------------------------------------------------------------------------
-// スタンプごとに色が変わる設定(色のランダム、将来の混色・水彩)のときだけ使う
-// キャンバスサイズのRGBA16F。使わない人にキャンバス1枚ぶんの追加メモリを
-// 払わせないよう、最初に必要になった時点で確保する。
-// ===========================================================================
 GLuint CanvasWidget::ensureStrokeColorTex()
 {
     if (!strokeColorSupported_) return 0;
@@ -574,25 +541,19 @@ GLuint CanvasWidget::ensureStrokeColorTex()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
-    // 中身のクリアは不要。stroke.compは「マスクが0の画素は色も0から始める」ため、
-    // 前のストロークの残りを読むことがない(あちらのコメント参照)。
+    // 中身のクリアは不要。
     WINLOG(QStringLiteral("strokeColorTex %1x%2 RGBA16F (%3MB) を確保")
                .arg(canvasW).arg(canvasH).arg(qint64(canvasW) * canvasH * 8 / (1024 * 1024)));
     return strokeColorTex;
 }
 
-// ===========================================================================
-// ペン先(スタンプ)画像
-// ===========================================================================
+// ペン先(スタンプ)画像。
 bool CanvasWidget::setPenTipImage(const QString &path)
 {
     QImage img(path);
     if (img.isNull()) return false;
 
-    // GLコンテキストの関数ポインタがまだ解決されていない(initializeGL()が一度も
-    // 走っていない)段階でGL関数を呼ぶとクラッシュする。ToolPropDockの構築時など、
-    // ウィンドウ表示前にこの関数が呼ばれることがあるため、その場合はパスの記録だけ
-    // 行い、実際のアップロードはinitializeGL()側の呼び出しに任せる。
+    // GLコンテキストの関数ポインタがまだ解決されていない(initializeGL()が一度も走っていない)段階でGL関数を呼ぶとクラッシュする。
     if (!glFunctionsReady_) {
         penTipTexPath_ = path;
         return true;
@@ -604,16 +565,13 @@ bool CanvasWidget::setPenTipImage(const QString &path)
     if (penTipTex == 0)
         glGenTextures(1, &penTipTex);
 
-    // キャンバステクスチャ群と違い、ペン先画像はユーザーが好きなタイミングで
-    // 差し替える(サイズも変わりうる)ので、glTexStorage2Dで固定サイズ確保するのではなく
-    // glTexImage2Dで都度作り直す(頻度が低いのでコストは無視できる)。
+    // ペン先画像はサイズが変わるため、差し替え時に作り直す。
     glBindTexture(GL_TEXTURE_2D, penTipTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, img.width(), img.height(), 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, img.constBits());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    // 境界外(端の1px外)を参照してもテクスチャの端の色が伸びるだけにし、
-    // 反対側が回り込んで見える(スタンプの端が変になる)のを防ぐ
+    // 境界外は端の色で埋める。
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -623,13 +581,10 @@ bool CanvasWidget::setPenTipImage(const QString &path)
     return true;
 }
 
-// ===========================================================================
-// 紙質テクスチャ
-// ===========================================================================
+// 紙質テクスチャ。
 bool CanvasWidget::setPaperTexture(const QString &path)
 {
     // 空パスは「紙質なし」。テクスチャは残したまま、パスだけ空にする
-    // (PenEraserTool側は設定の適用量が0かパスが空なら紙質を使わない)。
     if (path.isEmpty()) {
         paperTexPath_.clear();
         return true;
@@ -653,13 +608,10 @@ bool CanvasWidget::setPaperTexture(const QString &path)
     glBindTexture(GL_TEXTURE_2D, paperTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, img.width(), img.height(), 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, img.constBits());
-    // 紙の目はキャンバス全体に敷き詰めるので繰り返しで貼る(同梱テクスチャは
-    // 上下左右がシームレスに繋がるように作ってある。PaperTexPresets参照)。
+    // 紙の目はキャンバス全体に敷き詰めるので繰り返しで貼る(同梱テクスチャは上下左右がシームレスに繋がるように作ってある。PaperTexPresets参照)。
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    // 拡大率を1.0未満にすると1キャンバスpxが複数テクセルにまたがり、そのままでは
-    // モアレになる。ミップを作っておき、stroke.comp側は拡大率から求めたLODで
-    // textureLod()する(コンピュートシェーダーは微分が使えず自動LODが効かない)。
+    // 拡大率を1.0未満にすると1キャンバスpxが複数テクセルにまたがり、そのままではモアレになる。
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -675,10 +627,7 @@ void CanvasWidget::applyDisplayConfig()
     update();
 }
 
-// PNG/JPEG/BMP等の1枚の画像ファイルを、キャンバス全面を覆う1枚の通常レイヤーとして
-// 取り込む。PsdCodec::load()内のaddFlattenedNormalLayer(フラット画像PSDの取り込み)
-// と同じパターン(標準画像の行順=原点左上・Y下向きを、タイル格納が期待する
-// 行順=原点左下・Y上向きに変換するため上下反転してから書き込む)。
+// PNG/JPEG/BMP等の1枚の画像ファイルを、キャンバス全面を覆う1枚の通常レイヤーとして取り込む。
 bool CanvasWidget::loadImageAsSingleLayer(const QImage &image, const QString &layerName)
 {
     if (image.isNull() || image.width() <= 0 || image.height() <= 0) return false;
@@ -717,10 +666,7 @@ bool CanvasWidget::loadImageAsSingleLayer(const QImage &image, const QString &la
     return true;
 }
 
-// 「画像を追加」: 既存ドキュメントへ、現在のアクティブレイヤーの直上に画像を新規
-// 通常レイヤーとして挿入する。キャンバス中央に配置し、画像がキャンバスよりはみ出す
-// 場合はレイヤーの矩形がその分キャンバス外へ広がる(タイル座標は負値・キャンバス
-// 範囲外も許容される、Layer::originTx/originTyの既存の仕組みをそのまま使う)。
+// 「画像を追加」: 既存ドキュメントへ、現在のアクティブレイヤーの直上に画像を新規通常レイヤーとして挿入する。
 bool CanvasWidget::insertImageLayerAboveActive(const QImage &image, const QString &layerName)
 {
     if (!doc_ || doc_->layers.isEmpty()) return false;
@@ -729,8 +675,7 @@ bool CanvasWidget::insertImageLayerAboveActive(const QImage &image, const QStrin
     makeCurrent();
 
     const int imgW = image.width(), imgH = image.height();
-    // left/tiepoloYMinは、addFlattenedNormalLayer(PsdCodec.cpp)のleft/topPsdから
-    // 導出したtiepoloYMinと同じ意味(タイル格納の行順=原点左下基準でのオフセット)。
+    // left/tiepoloYMinは、addFlattenedNormalLayer(PsdCodec.cpp)のleft/topPsdから導出したtiepoloYMinと同じ意味(タイル格納の行順=原点左下基準でのオフセット)。
     const int left = (canvasW - imgW) / 2;
     const int tiepoloYMin = (canvasH - imgH) / 2;
 
@@ -743,10 +688,6 @@ bool CanvasWidget::insertImageLayerAboveActive(const QImage &image, const QStrin
     const int insertIndex = doc_->activeLayerIndex() + 1;
 
     // 増えるのはこの1枚だけなので、その中身だけをUndoに持つ
-    // (UndoKind::LayerAdd + hasContent。以前は前後2回 captureAllLayerSnapshots() で
-    //  全レイヤーを読み戻していて、レイヤーが多いほど遅かった)。
-    // ファイルを開く経路(loadImageAsSingleLayer等)も同じbeginBulkLayerImportを
-    // 使うが、あちらは新規ドキュメントの構築なのでUndo対象にしない。
     beginLayerAddUndo();
 
     beginBulkLayerImport();
@@ -758,8 +699,7 @@ bool CanvasWidget::insertImageLayerAboveActive(const QImage &image, const QStrin
     }
     doc_->setActiveLayer(insertIndex);
 
-    // 標準的な画像ファイル(原点左上、Y下向き)を、タイル格納が期待する行順
-    // (原点左下、Y上向き)に変換するため上下反転する。
+    // 標準的な画像ファイル(原点左上、Y下向き)を、タイル格納が期待する行順(原点左下、Y上向き)に変換するため上下反転する。
     const QImage img = image.convertToFormat(QImage::Format_RGBA8888_Premultiplied).mirrored(false, true);
 
     const Layer &layer = doc_->layerRef(insertIndex);
@@ -781,8 +721,7 @@ bool CanvasWidget::insertImageLayerAboveActive(const QImage &image, const QStrin
         }
     }
 
-    // endBulkLayerImport()のglFinish()より後にcommitする(書き込みがGPU側で
-    // 完了する前に読み戻すと、途中状態が焼き付いてしまう)。
+    // endBulkLayerImport()のglFinish()より後にcommitする(書き込みがGPU側で完了する前に読み戻すと、途中状態が焼き付いてしまう)。
     endBulkLayerImport();
     commitLayerAddUndo(insertIndex, /*ancestorFolders=*/{}, /*duplicateSourceIndex=*/-1,
                        /*captureContent=*/true);
@@ -798,9 +737,8 @@ void CanvasWidget::endBulkLayerImport()
 {
     m_initializing = false;
 
-    // 大量のglTexSubImage3D/writeSlicePixels書き込みがGPU側でまだ実行中のうちに
-    // 次のフレームのpaintGL()がlayerTexArrayを読みに行くと、タイミング次第で
-    // ドライバ側の状態が不整合になりうる(rebuildCanvasFromSnapshotsと同様の理由)。
+    // 大量のglTexSubImage3D/writeSlicePixels書き込みがGPU側でまだ実行中のうちに次のフレームのpaintGL()がlayerTexArrayを読みに行くと、
+    // タイミング次第でドライバ側の状態が不整合になりうる(rebuildCanvasFromSnapshotsと同様の理由)。
     makeCurrent();
     glFinish();
 
@@ -808,16 +746,7 @@ void CanvasWidget::endBulkLayerImport()
     update();
 }
 
-// ---------------------------------------------------------------------------
 // レイヤー追加のUndo (UndoKind::LayerAdd)
-// ---------------------------------------------------------------------------
-// 追加直後のレイヤーは必ず中身が空なので、削除/複製/結合が使う全レイヤー
-// スナップショット方式(pushLayerStructureUndo)ではなく、作り直しに要る
-// パラメータだけを持つ軽量エントリを積む(LayerAddUndoDataのコメント参照)。
-//
-// addLayer()の中ではなく呼び出し側で挟む形にしてあるのは、種類ごとの後追い設定
-// (単色レイヤーの色、調整レイヤーの種類、アクティブレイヤーの変更)がaddLayer()の
-// 後に行われるため。それらが済んでからcommitしないと、Redoで設定が失われる。
 void CanvasWidget::beginLayerAddUndo()
 {
     if (!doc_) return;
@@ -849,17 +778,14 @@ void CanvasWidget::commitLayerAddUndo(int insertedIndex, const QVector<int> &anc
     d.opacity    = ly.opacity;
     d.visible    = ly.visible;
     d.blendMode  = ly.blendMode;
-    // tilesX()/tilesY()をそのままoverrideとして渡し直す。タイルを持たない種類
-    // (単色/調整/フォルダー)は0なので、CanvasDocument::addLayer側で同じく0タイルになる。
+    // tilesX()/tilesY()をそのままoverrideとして渡し直す。
     d.tilesX     = ly.tilesX();
     d.tilesY     = ly.tilesY();
     d.solidColor = ly.solidColor;
     d.adjustment = ly.adjustment;
     d.filter     = ly.filter;
 
-    // 画像インポートのように中身のあるレイヤーが増える場合は、その1枚ぶんだけ
-    // 中身も持っておく(Redoで作り直すため)。呼び出し側はピクセルを書き終えてから
-    // commitすること。
+    // 画像インポートのように中身のあるレイヤーが増える場合は、その1枚ぶんだけ中身も持っておく(Redoで作り直すため)。
     if (captureContent) {
         makeCurrent();
         d.content    = captureRemovedLayer(insertedIndex);
@@ -875,8 +801,7 @@ void CanvasWidget::abortLayerAddUndo()
     pendingLayerAddActiveBefore_ = -1;
 }
 
-// toBefore=true : 追加を取り消す(そのレイヤーを削除する)
-// toBefore=false: 追加をやり直す(同じ設定で作り直す)
+// toBefore=true : 追加を取り消す(そのレイヤーを削除する)。
 void CanvasWidget::applyLayerAddUndoEntry(const UndoEntry &entry, bool toBefore)
 {
     if (!doc_) return;
@@ -885,26 +810,23 @@ void CanvasWidget::applyLayerAddUndoEntry(const UndoEntry &entry, bool toBefore)
 
     if (toBefore) {
         if (d.insertIndex < 0 || d.insertIndex >= doc_->layerCount()) return;
-        // CanvasWidget::removeLayer(公開版)ではなくdoc_を直接触る。公開版は自分で
-        // 構造Undoを積んでしまうため、Undo適用中に呼ぶと履歴が壊れる。
+        // CanvasWidget::removeLayer(公開版)ではなくdoc_を直接触る。
         doc_->removeLayer(d.insertIndex, d.ancestorFolders, /*includeContents=*/true);
         doc_->setActiveLayer(qBound(0, d.activeBefore, doc_->layerCount() - 1));
     } else {
         if (d.duplicateSourceIndex >= 0) {
             // 複製のRedo: ピクセルは複製元から作り直せるので保存していない。
-            // Undo/Redoは線形なので、この時点の複製元の中身は複製した当時と一致する。
             if (duplicateLayer(d.duplicateSourceIndex, d.insertIndex, d.ancestorFolders) < 0)
                 return;
         } else if (d.hasContent) {
-            // 画像インポートのRedo: 保存しておいた中身ごと作り直す
+            // 画像インポートのRedo: 保存しておいた中身ごと作り直す。
             if (!restoreRemovedLayer(d.content, d.insertIndex, d.ancestorFolders))
                 return;
         } else if (!addLayer(d.name, d.insertIndex, d.clipping, d.originTx, d.originTy,
                              d.tilesX, d.tilesY, d.layerType, d.ancestorFolders)) {
             return;
         }
-        // 作成直後の既定値ではなく、記録しておいた設定へ戻す(複製の場合、呼び出し側が
-        // 複製後にclippingを立てる等の後追い変更をしていることがあるため)。
+        // 作成直後の既定値ではなく、記録しておいた設定へ戻す(複製の場合、呼び出し側が複製後にclippingを立てる等の後追い変更をしていることがあるため)。
         Layer &ly = doc_->layerRef(d.insertIndex);
         ly.name       = d.name;
         ly.clipping   = d.clipping;
@@ -921,11 +843,7 @@ void CanvasWidget::applyLayerAddUndoEntry(const UndoEntry &entry, bool toBefore)
     emit layersChanged();
 }
 
-// ---------------------------------------------------------------------------
-// レイヤー削除のUndo (UndoKind::LayerRemove)
-// ---------------------------------------------------------------------------
-// 1枚ぶんの中身をタイルの生データごと読み出す。QImage経由のLayerSnapshotDataと違い、
-// キャンバス外へはみ出した領域(Layer::originTx等)もそのまま保持できる。
+// レイヤー削除のUndo (UndoKind::LayerRemove)1枚ぶんの中身をタイルの生データごと読み出す。
 RemovedLayerData CanvasWidget::captureRemovedLayer(int layerIndex)
 {
     RemovedLayerData d;
@@ -969,7 +887,7 @@ bool CanvasWidget::restoreRemovedLayer(const RemovedLayerData &d, int insertInde
 {
     if (!doc_) return false;
 
-    // 元の矩形(キャンバス外へのはみ出しを含む)をそのまま再現する
+    // 元の矩形(キャンバス外へのはみ出しを含む)をそのまま再現する。
     if (!addLayer(d.name, insertIndex, d.clipping, d.originTx, d.originTy,
                   d.tilesX, d.tilesY, d.layerType, ancestorFolders))
         return false;
@@ -981,9 +899,8 @@ bool CanvasWidget::restoreRemovedLayer(const RemovedLayerData &d, int insertInde
     ly.solidColor = d.solidColor;
     ly.adjustment = d.adjustment;
     ly.textBoxes  = d.textBoxes;
-    // フォルダーのchildCountは、中身を1枚ずつ復元する過程でaddLayer()が
-    // ancestorFoldersから増やすのではなく、保存しておいた値をそのまま入れる
-    // (中身の復元時に渡すancestorFoldersは「削除時に渡された外側の階層」だけなので)。
+    // フォルダーのchildCountは、中身を1枚ずつ復元する過程でaddLayer()がancestorFoldersから増やすのではなく、
+    // 保存しておいた値をそのまま入れる(中身の復元時に渡すancestorFoldersは「削除時に渡された外側の階層」だけなので)。
     ly.childCount = d.childCount;
 
     for (int ty = 0, i = 0; ty < d.tilesY; ty++)
@@ -999,8 +916,7 @@ bool CanvasWidget::restoreRemovedLayer(const RemovedLayerData &d, int insertInde
     return true;
 }
 
-// toBefore=true : 削除を取り消す(保存しておいたレイヤーを挿入し直す)
-// toBefore=false: 削除をやり直す(同じ引数でもう一度削除する)
+// toBefore=true : 削除を取り消す(保存しておいたレイヤーを挿入し直す)。
 void CanvasWidget::applyLayerRemoveUndoEntry(const UndoEntry &entry, bool toBefore)
 {
     if (!doc_) return;
@@ -1030,8 +946,6 @@ bool CanvasWidget::removeLayer(int layerIndex, const QVector<int> &ancestorFolde
     makeCurrent();
 
     // 消える範囲だけを保存する(CanvasDocument::removeLayerと同じ範囲計算)。
-    // 以前は前後2回 captureAllLayerSnapshots() していたが、復元に要るのは
-    // 消えるレイヤーだけなので、無関係なレイヤーまで読み戻す必要は無い。
     const bool cascade = includeContents
                        && doc_->layerAt(layerIndex).layerType == LayerType::Folder;
     const int count = cascade ? 1 + doc_->layerAt(layerIndex).childCount : 1;
@@ -1046,9 +960,7 @@ bool CanvasWidget::removeLayer(int layerIndex, const QVector<int> &ancestorFolde
     for (int i = 0; i < count; i++)
         d.layers.append(captureRemovedLayer(layerIndex + i));
 
-    // doc_->removeLayer 内でコールバック経由 freeSlice が呼ばれ、
-    // 通知(CacheAndNotify)も内部で発行される。フォルダーを丸ごと消して
-    // ドキュメントが空になってしまう等の理由で失敗した場合は何もしない。
+    // doc_->removeLayer 内でコールバック経由 freeSlice が呼ばれ、通知(CacheAndNotify)も内部で発行される。
     if (!doc_->removeLayer(layerIndex, ancestorFolders, includeContents)) return false;
 
     UndoEntry entry;
@@ -1073,8 +985,7 @@ int CanvasWidget::mergeLayers(int survivorIndex, int victimIndex, const QVector<
     return result;
 }
 
-// toBefore=true : 結合を取り消す(survivorのピクセル/不透明度を戻し、victimを挿入し直す)
-// toBefore=false: 結合をやり直す(同じ引数でもう一度結合する)
+// toBefore=true : 結合を取り消す(survivorのピクセル/不透明度を戻し、victimを挿入し直す)。
 void CanvasWidget::applyLayerMergeUndoEntry(const UndoEntry &entry, bool toBefore)
 {
     if (!doc_) return;
@@ -1082,7 +993,7 @@ void CanvasWidget::applyLayerMergeUndoEntry(const UndoEntry &entry, bool toBefor
     makeCurrent();
 
     if (toBefore) {
-        // victimを挿入し直す前のsurvivorの位置(mergeLayersInternalの戻り値と同じ計算)
+        // victimを挿入し直す前のsurvivorの位置(mergeLayersInternalの戻り値と同じ計算)。
         const int survivorNow = (d.victimIndex < d.survivorIndex) ? d.survivorIndex - 1 : d.survivorIndex;
         if (survivorNow < 0 || survivorNow >= doc_->layerCount()) return;
 
@@ -1106,10 +1017,7 @@ void CanvasWidget::applyLayerMergeUndoEntry(const UndoEntry &entry, bool toBefor
     emit layersChanged();
 }
 
-// 結合の本体。undoOut != nullptr のとき、Undoに必要な2枚(矩形拡張後・ピクセル結合前の
-// survivor / 消える直前のvictim)だけをそこへ書き出す。
-// 以前はここで前後2回 captureAllLayerSnapshots() をしていたが、全レイヤーを非圧縮で
-// GPU→CPUへ読み戻すため、レイヤーが多いドキュメントでは非常に遅かった。
+// 結合の本体。
 int CanvasWidget::mergeLayersInternal(int survivorIndex, int victimIndex,
                                    const QVector<int> &ancestorFolders,
                                    LayerMergeUndoData *undoOut)
@@ -1121,12 +1029,11 @@ int CanvasWidget::mergeLayersInternal(int survivorIndex, int victimIndex,
 
     makeCurrent();
 
-    // victim削除で参照が無効化されうるので、必要な値は先にコピーしておく
+    // victim削除で参照が無効化されうるので、必要な値は先にコピーしておく。
     const Layer survivorInfo0 = doc_->layerAt(survivorIndex);
     const Layer victimInfo    = doc_->layerAt(victimIndex);
 
-    // 単色レイヤーは実ピクセルデータを持たないため、通常の結合(ピクセル読み書き)は
-    // 対応できない(データが失われる)。どちらかが単色レイヤーなら結合しない。
+    // 単色レイヤーは実ピクセルデータを持たないため、通常の結合(ピクセル読み書き)は対応できない(データが失われる)。
     if (survivorInfo0.layerType != LayerType::Normal || victimInfo.layerType != LayerType::Normal)
         return -1;
 
@@ -1139,10 +1046,7 @@ int CanvasWidget::mergeLayersInternal(int survivorIndex, int victimIndex,
         undoOut->victim                 = captureRemovedLayer(victimIndex);
     }
 
-    // survivor/victimどちらかがキャンバスからはみ出している(またはsurvivorが
-    // victimより小さい)場合、キャンバスタイル範囲だけを回すとvictimのはみ出し
-    // ピクセルが黙って失われる。結合前にsurvivorの矩形をsurvivor+victimの
-    // 和集合まで広げておく(新規タイルは透明クリアされる)。
+    // survivor/victimどちらかがキャンバスからはみ出している(またはsurvivorがvictimより小さい)場合、キャンバスタイル範囲だけを回すとvictimのはみ出しピクセルが黙って失われる。
     const int unionMinTx   = qMin(survivorInfo0.originTx, victimInfo.originTx);
     const int unionMinTy   = qMin(survivorInfo0.originTy, victimInfo.originTy);
     const int unionMaxTxEx = qMax(survivorInfo0.originTx + survivorInfo0.tilesX(),
@@ -1154,8 +1058,7 @@ int CanvasWidget::mergeLayersInternal(int survivorIndex, int victimIndex,
 
     const Layer survivorInfo = doc_->layerAt(survivorIndex); // 拡張後の最新の矩形/スライスを取り直す
 
-    // 拡張が終わった(=矩形が確定した)この時点のsurvivorを保存する。Undoでは
-    // これを書き戻すだけで、矩形を縮めなくても結合前と同じ見た目に戻せる。
+    // 拡張が終わった(=矩形が確定した)この時点のsurvivorを保存する。
     if (undoOut) {
         undoOut->survivorTilesX = survivorInfo.tilesX();
         undoOut->survivorTilesY = survivorInfo.tilesY();
@@ -1165,7 +1068,7 @@ int CanvasWidget::mergeLayersInternal(int survivorIndex, int victimIndex,
                 undoOut->survivorTiles.append(readSlicePixels(survivorInfo.tiles[ty][tx]));
     }
 
-    // 通知は最後(removeLayer)でまとめて1回だけ発行させる
+    // 通知は最後(removeLayer)でまとめて1回だけ発行させる。
     m_suppressDocNotify = true;
     for (int ty = unionMinTy; ty < unionMaxTyEx; ty++) {
         for (int tx = unionMinTx; tx < unionMaxTxEx; tx++) {
@@ -1183,7 +1086,7 @@ int CanvasWidget::mergeLayersInternal(int survivorIndex, int victimIndex,
         }
     }
 
-    // 不透明度を焼き込んだので1.0にリセットする(通知は抑制済みなので直接書き換え)
+    // 不透明度を焼き込んだので1.0にリセットする(通知は抑制済みなので直接書き換え)。
     doc_->layerRef(survivorIndex).opacity = 1.0f;
     m_suppressDocNotify = false;
 
@@ -1199,19 +1102,12 @@ int CanvasWidget::duplicateLayer(int sourceIndex, int insertIndex, const QVector
     if (!doc_) return -1;
     if (sourceIndex < 0 || sourceIndex >= doc_->layerCount()) return -1;
 
-    // Undoは呼び出し側が beginLayerAddUndo()/commitLayerAddUndo(..., sourceIndex) で挟む
-    // (UndoKind::LayerAdd の複製版)。以前はここで前後2回 captureAllLayerSnapshots() を
-    // していたが、全レイヤーを非圧縮でGPU→CPUへ読み戻すため、フォルダーの複製
-    // (中身1枚ごとにこの関数を呼ぶ)では枚数×2回ぶんかかって非常に遅かった。
-    // 複製されたレイヤーの中身は複製元のコピーなので、Undo用に保存する必要は無い。
+    // Undoは呼び出し側が beginLayerAddUndo()/commitLayerAddUndo(..., sourceIndex) で挟む(UndoKind::LayerAdd の複製版)。
     makeCurrent();
 
     const Layer src = doc_->layerAt(sourceIndex); // 値コピー(以降のaddLayerで参照が動いても安全)
 
-    // addLayer内部の通知("空のタイル"の状態)は抑制し、複製し終えてから1回だけ通知する
-    // 複製元の矩形(キャンバスより大きい/はみ出している場合を含む)をそのまま引き継ぐ。
-    // フォルダーの場合、中身(childCount枚)は複製されない(空のフォルダーとして
-    // 複製される。addLayerのtilesX()/tilesY()は0のままなので通常のaddLayerで足りる)。
+    // addLayer内部の通知("空のタイル"の状態)は抑制し、複製し終えてから1回だけ通知する複製元の矩形(キャンバスより大きい/はみ出している場合を含む)をそのまま引き継ぐ。
     m_suppressDocNotify = true;
     bool ok = doc_->addLayer(src.name + " コピー", insertIndex, src.clipping,
                               src.originTx, src.originTy, src.tilesX(), src.tilesY(),
@@ -1223,8 +1119,7 @@ int CanvasWidget::duplicateLayer(int sourceIndex, int insertIndex, const QVector
     int newIndex = doc_->activeLayerIndex(); // addLayerが新規レイヤーをアクティブにする
 
     const Layer newLayer = doc_->layerAt(newIndex);
-    // src/newLayerは同じ形(タイル数・原点)で確保されているので、ローカル座標を
-    // そのまま1対1で対応させられる
+    // コピー元と複製先は同じタイル配置。
     for (int ty = 0; ty < src.tilesY(); ty++) {
         for (int tx = 0; tx < src.tilesX(); tx++) {
             int srcSlice = src.tiles[ty][tx];
@@ -1241,8 +1136,7 @@ int CanvasWidget::duplicateLayer(int sourceIndex, int insertIndex, const QVector
     doc_->layerRef(newIndex).textBoxes = src.textBoxes; // テキストレイヤー以外では無意味だが無害
     doc_->layerRef(newIndex).solidColor = src.solidColor; // 単色レイヤー以外では無意味だが無害
 
-    // マスクを持っていれば、複製先にも新しいタイルを確保して中身をそのままコピーする
-    // (マスクは常にキャンバス全体を覆う固定形なので、srcとnewLayerで1対1に対応する)。
+    // マスクを持っていれば、複製先にも新しいタイルを確保して中身をそのままコピーする(マスクは常にキャンバス全体を覆う固定形なので、srcとnewLayerで1対1に対応する)。
     if (src.hasMask && doc_->addLayerMask(newIndex)) {
         const Layer &newLayerWithMask = doc_->layerAt(newIndex);
         for (int ty = 0; ty < src.maskTilesY(); ty++) {
@@ -1363,12 +1257,7 @@ void CanvasWidget::nudgeActiveContent(int dx, int dy)
     }
 }
 
-// レイヤーの実ピクセル内容全体(キャンバス外にはみ出た部分も含む)を(dx,dy)だけ
-// 平行移動する。captureAllLayerSnapshotsと違い、はみ出た部分も含めて読み出すため、
-// cutSelection()の「選択なし」時のレイヤー全読み出しと同じlayer.originTx/originTy
-// 基準のループを使う。移動後にレイヤー矩形がキャンバス範囲外へ広がる分は
-// growLayerBoundsToCoverCanvasTilesで確保し(既存矩形との和集合)、レイヤーの
-// 全タイルを移動後の内容で描き直す(=元の位置の内容は自動的に消える)。
+// レイヤーの実ピクセル内容全体(キャンバス外にはみ出た部分も含む)を(dx,dy)だけ平行移動する。
 void CanvasWidget::nudgeActiveLayer(int dx, int dy)
 {
     if (!doc_ || doc_->layers.isEmpty()) return;
@@ -1441,9 +1330,7 @@ void CanvasWidget::nudgeActiveLayer(int dx, int dy)
     update();
 }
 
-// ===========================================================================
-// レイヤープレビュー
-// ===========================================================================
+// レイヤープレビュー。
 QImage CanvasWidget::getLayerPreview(int zStart, int zEnd, int size) {
     makeCurrent();
     return compositor_.renderLayerPreview(toolCtx_, zStart, zEnd, size);
@@ -1463,14 +1350,10 @@ QImage CanvasWidget::getMaskPreview(int layerIndex, int size)
     return compositor_.renderMaskPreview(toolCtx_, layerIndex, size);
 }
 
-// ===========================================================================
-// 塗りつぶし
-// ===========================================================================
+// 塗りつぶし。
 void CanvasWidget::executeFill(const QPointF &widgetPos, float wallThreshold)
 {
     fillTool_.execute(toolCtx_, widgetPos);
 }
 
-// ===========================================================================
 // Undo / Redo
-// ===========================================================================

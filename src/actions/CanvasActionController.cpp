@@ -1,8 +1,7 @@
 #include "actions/CanvasActionController.h"
 #include "actions/CanvasActionHost.h"
 
-// blocksToolInput()==true かつ blocksAllToolInput()==false(=移動/回転ツールへの
-// 切替だけ素通しする色調整/フィルター系)のときだけ、host へ開始/終了を通知する。
+// blocksToolInput()==true かつ blocksAllToolInput()==false(=移動/回転ツールへの切替だけ素通しする色調整/フィルター系)のときだけ、host へ開始/終了を通知する。
 static bool needsToolBlockNotification(const CanvasAction *a)
 {
     return a && a->blocksToolInput() && !a->blocksAllToolInput();
@@ -12,7 +11,6 @@ void CanvasActionController::start(CanvasAction *action)
 {
     if (!action) return;
     // 相互排他: 別のアクションが動いていたらキャンセルしてから開始する。
-    // (同じアクションを再度 start しても、一旦 cancel されてから開き直る)
     cancelActive();
     if (action->begin()) {
         active_ = action;
@@ -54,10 +52,7 @@ void CanvasActionController::releaseAllGL()
 
 void CanvasActionController::applyRenderState(QOpenGLShaderProgram *renderProg)
 {
-    // render.frag の uIsXxxTool 系 uniform はプログラムに保持され続けるため、
-    // 毎フレーム全アクションに設定させる(非アクティブなら自分の uniform を 0 に、
-    // アクティブなら 1 + パラメータに)。これは移行前の paintGL が
-    // 全 uIsXxxTool を毎フレーム 0/1 設定していた挙動と一致する。
+    // render.frag の uIsXxxTool 系 uniform はプログラムに保持され続けるため、毎フレーム全アクションに設定させる(非アクティブなら自分の uniform を 0 に、アクティブなら 1 + パラメータに)。
     for (auto &a : actions_)
         a->applyRenderState(renderProg);
 }
@@ -76,9 +71,7 @@ bool CanvasActionController::routeMousePress(QMouseEvent *e, ToolContext &ctx)
 {
     if (!active_) return false;
     const bool consumed = active_->handleMousePress(e, ctx);
-    // 変形/自由変形などは確定・キャンセルボタンのクリックをhandleMousePress内で自己判定
-    // して isActive() を false にすることがある。その場合ここで追従して外し、以後の
-    // イベントが通常のツール処理へ正しくフォールスルーするようにする。
+    // 変形/自由変形などは確定・キャンセルボタンのクリックをhandleMousePress内で自己判定して isActive() を false にすることがある。
     if (active_ && !active_->isActive()) active_ = nullptr;
     return consumed;
 }

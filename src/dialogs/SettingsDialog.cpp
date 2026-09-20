@@ -1,4 +1,4 @@
-#include "dialogs/SettingsDlg.h"
+#include "dialogs/SettingsDialog.h"
 #include "components/ColorWheelWidget.h" // 色相ツイストの範囲(HUE_TWIST_MIN/MAX)
 #include "dialogs/ToneCurveEditor.h"
 #include "tools/core/PressureCurve.h"   // カーブ制御点の文字列化(toString/fromString)
@@ -24,7 +24,7 @@
 // ===========================================================================
 // QSettings との対応
 // ===========================================================================
-SettingsDlg::Values SettingsDlg::loadValues()
+SettingsDialog::Values SettingsDialog::loadValues()
 {
     QSettings s;
     Values v;
@@ -56,7 +56,7 @@ SettingsDlg::Values SettingsDlg::loadValues()
     return v;
 }
 
-void SettingsDlg::saveValues(const Values &v)
+void SettingsDialog::saveValues(const Values &v)
 {
     QSettings s;
     s.beginGroup("preferences");
@@ -84,7 +84,7 @@ void SettingsDlg::saveValues(const Values &v)
 // ===========================================================================
 // コンストラクタ
 // ===========================================================================
-SettingsDlg::SettingsDlg(QWidget *parent)
+SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle("環境設定");
@@ -122,7 +122,7 @@ SettingsDlg::SettingsDlg(QWidget *parent)
     // ---- 下部: OK / キャンセル ----
     QDialogButtonBox *buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(buttons, &QDialogButtonBox::accepted, this, &SettingsDlg::onAccept);
+    connect(buttons, &QDialogButtonBox::accepted, this, &SettingsDialog::onAccept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     rootLayout->addWidget(buttons);
 
@@ -132,7 +132,7 @@ SettingsDlg::SettingsDlg(QWidget *parent)
 // ===========================================================================
 // 一般ページ
 // ===========================================================================
-QWidget *SettingsDlg::createGeneralPage()
+QWidget *SettingsDialog::createGeneralPage()
 {
     QWidget     *page = new QWidget();
     QFormLayout *form = new QFormLayout(page);
@@ -209,7 +209,7 @@ QWidget *SettingsDlg::createGeneralPage()
 // 筆圧。曲線上をクリックで節点追加、ドラッグで移動、選択して削除。
 // ここで使っているのはトーンカーブと同じ編集ウィジェット(ToneCurveEditor)。
 // ===========================================================================
-QWidget *SettingsDlg::createInputPage()
+QWidget *SettingsDialog::createInputPage()
 {
     QWidget     *page = new QWidget();
     QVBoxLayout *v    = new QVBoxLayout(page);
@@ -264,7 +264,7 @@ QWidget *SettingsDlg::createInputPage()
 // ===========================================================================
 // ファイルページ
 // ===========================================================================
-QWidget *SettingsDlg::createFilePage()
+QWidget *SettingsDialog::createFilePage()
 {
     QWidget     *page = new QWidget();
     QFormLayout *form = new QFormLayout(page);
@@ -277,7 +277,7 @@ QWidget *SettingsDlg::createFilePage()
     projectRow->addWidget(projectDirEdit, 1);
     projectRow->addWidget(projectBrowseBtn);
     form->addRow("プロジェクトファイル保存先", projectRow);
-    connect(projectBrowseBtn, &QPushButton::clicked, this, &SettingsDlg::browseProjectDir);
+    connect(projectBrowseBtn, &QPushButton::clicked, this, &SettingsDialog::browseProjectDir);
 
     auto *exportRow = new QHBoxLayout();
     exportDirEdit = new QLineEdit(); {
@@ -287,18 +287,18 @@ QWidget *SettingsDlg::createFilePage()
     exportRow->addWidget(exportDirEdit, 1);
     exportRow->addWidget(exportBrowseBtn);
     form->addRow("書き出しファイル保存先", exportRow);
-    connect(exportBrowseBtn, &QPushButton::clicked, this, &SettingsDlg::browseExportDir);
+    connect(exportBrowseBtn, &QPushButton::clicked, this, &SettingsDialog::browseExportDir);
 
     return page;
 }
 
-void SettingsDlg::browseProjectDir()
+void SettingsDialog::browseProjectDir()
 {
     const QString dir = QFileDialog::getExistingDirectory(this, "プロジェクトファイル保存先", projectDirEdit->text());
     if (!dir.isEmpty()) projectDirEdit->setText(QDir::toNativeSeparators(dir));
 }
 
-void SettingsDlg::browseExportDir()
+void SettingsDialog::browseExportDir()
 {
     const QString dir = QFileDialog::getExistingDirectory(this, "書き出しファイル保存先", exportDirEdit->text());
     if (!dir.isEmpty()) exportDirEdit->setText(QDir::toNativeSeparators(dir));
@@ -307,7 +307,7 @@ void SettingsDlg::browseExportDir()
 // ===========================================================================
 // OK 押下時: 全ページの値を current にまとめてから保存
 // ===========================================================================
-void SettingsDlg::onAccept()
+void SettingsDialog::onAccept()
 {
     current.defaultCanvasW   = canvasWSpin->value();
     current.defaultCanvasH   = canvasHSpin->value();

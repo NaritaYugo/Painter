@@ -7,7 +7,7 @@ class QLabel;
 class QPushButton;
 
 // ---------------------------------------------------------------------------
-// CalibrationDlg
+// CalibrationDialog
 //
 // モニターキャリブレーション用の非モーダルダイアログ。
 // 「明るさ・コントラスト・CMY」のスライダーをドラッグするたびに即座に
@@ -15,11 +15,11 @@ class QPushButton;
 // (実データ/カラーモード変換後の最終出力に対する調整のため、確定/キャンセルの
 // 概念は持たず、変更は都度そのまま設定として残る)。
 // ---------------------------------------------------------------------------
-class CalibrationDlg : public QDialog
+class CalibrationDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit CalibrationDlg(QWidget *parent = nullptr);
+    explicit CalibrationDialog(QWidget *parent = nullptr);
 
     // 呼び出し側(toolCfg->calibration())の現在値でスライダーを揃える
     // (シグナルは発行しない)。

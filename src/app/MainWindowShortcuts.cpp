@@ -2,7 +2,7 @@
 #include "canvas/CanvasWidget.h"
 #include "docks/BrushSizeDock.h"
 #include "docks/ToolDock.h"
-#include "dialogs/ShortcutsDlg.h"
+#include "dialogs/ShortcutsDialog.h"
 
 #include <QAction>
 #include <QSettings>
@@ -79,8 +79,8 @@ void MainWindow::setupActions()
     shortcutsAction = sc.registerCommand(this, "cmd_shortcuts", "ショートカットキー設定...", "ファイル",
         0,
         [this] {
-            ShortcutsDlg dlg(shortcuts_, toolCfg, this);
-            dlg.exec(); // 反映・保存はダイアログのOKハンドラ内で即座に行われる
+            ShortcutsDialog dialog(shortcuts_, toolCfg, this);
+            dialog.exec(); // 反映・保存はダイアログのOKハンドラ内で即座に行われる
             toolDock->refreshTooltips(); // ツールドックの「ペン(Q)」等の表示も更新する
         });
 

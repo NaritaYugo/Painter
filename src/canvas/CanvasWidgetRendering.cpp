@@ -56,10 +56,7 @@ constexpr int kStrokeColorTexUnit = 16;
 }
 
 void CanvasWidget::initializeGL() {
-    // 計測用。QOpenGLWidgetは親が変わるとコンテキストごと作り直されるため、
-    // タブを別ペインへ移す(=分割)たびにここが再実行されうる。その場合は
-    // シェーダーを全部コンパイルし直すので、何回呼ばれて各段が何msかかっているかを
-    // 見られるようにしておく(TIEPOLO_WINLOG=1 のときだけ)。
+    // 計測用。
     static int initCount = 0;
     ++initCount;
     QElapsedTimer initTimer;
@@ -69,8 +66,6 @@ void CanvasWidget::initializeGL() {
     glFunctionsReady_ = true;
 
     // シェーダープログラムはプロセス全体で1組だけ作り、全タブ(CanvasWidget)で共有する。
-    // 実体と事前コンパイルは ShaderCache が持つ(理由と計測値はそちらのコメント参照)。
-    // ここで引くときには、たいてい起動直後の背景コンパイルで出来上がっている。
     computeDrawProgram         = ShaderCache::compute(":/shaders/paint/stroke.comp");
     computeBakeProgram         = ShaderCache::compute(":/shaders/paint/bake.comp");
     computeBrushStateProgram   = ShaderCache::compute(":/shaders/paint/brushState.comp");
@@ -110,10 +105,7 @@ void CanvasWidget::initializeGL() {
     computeBelowCompositeProgram     = ShaderCache::compute(":/shaders/render/belowComposite.comp");
     renderProgram                    = ShaderCache::render();
 
-    // ストローク色バッファ用のテクスチャユニットが取れるか。render.fragは
-    // 0〜7を個別のテクスチャ、8〜15をレイヤーバンクで使い切っているので16番が要る。
-    // GL4.3の下限がちょうど16なので、ここで実際の上限を確かめておく
-    // (足りない環境ではスタンプごとの色の経路自体を使わない)。
+    // ストローク色バッファ用のテクスチャユニットが取れるか。
     {
         GLint maxTexUnits = 0;
         glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxTexUnits);
@@ -127,18 +119,14 @@ void CanvasWidget::initializeGL() {
     const qint64 texMs = initTimer.elapsed() - shaderMs;
     glGenVertexArrays(1, &dummyVAO);
     // ペン先画像(キャンバスサイズに依存しないのでinitTextures()とは別に一度だけ確保する)。
-    // 保存済み設定にパスが残っていればそれを、読み込みに失敗したら既定の丸ブラシを使う。
     if (!setPenTipImage(toolCfg_->pen().tipImagePath()))
         setPenTipImage(":/textures/penTip/circle.png");
 
-    // 紙質テクスチャも同様。既定は「なし」(空パス)なので、通常はここで何もしない。
+    // 紙質テクスチャも同様。
     if (!setPaperTexture(toolCfg_->pen().paperTexPath()))
         setPaperTexture(QString());
 
-    // トーンカーブLUT(256x1, R8)。キャンバスサイズに依存しないので一度だけ確保し、
-    // 恒等カーブ(出力=入力)で初期化しておく。以後はToneCurveTool::uploadLutが
-    // glTexSubImage2Dで中身だけ差し替える。GL_LINEARで補間することで、256段階の
-    // 粗さを感じさせずになめらかに色を変換できる。
+    // トーンカーブLUT(256x1, R8)。
     {
         glGenTextures(1, &toneCurveLUTTex);
         glBindTexture(GL_TEXTURE_2D, toneCurveLUTTex);
@@ -152,10 +140,7 @@ void CanvasWidget::initializeGL() {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
-    // グラデーションマップ(Pro限定)用のLUT。上のトーンカーブLUTと同じ扱いだが、
-    // 輝度1つから色(RGB)を引くのでRGBA8。初期値は黒→白の素直なグラデーション。
-    // 無料版ビルドではこのLUTを書き換えるツール自体が存在しないが、render.fragは
-    // 常にユニット0へこれを束縛するので、テクスチャ自体は両版で確保しておく。
+    // グラデーションマップ(Pro限定)用のLUT。
     {
         glGenTextures(1, &gradientMapLUTTex);
         glBindTexture(GL_TEXTURE_2D, gradientMapLUTTex);
@@ -174,10 +159,9 @@ void CanvasWidget::initializeGL() {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
-    // ペンストロークのバッチスタンプ用SSBO(stroke.comp参照)。中身は使用のたびに
-    // glBufferSubData/glBufferDataで書き換えるので、ここでは器だけ確保しておく。
+    // ペンストロークのバッチスタンプ用SSBO(stroke.comp参照)。
     glGenBuffers(1, &strokeStampSSBO_);
-    // 筆に乗っている絵の具(vec4 1個)。中身はストローク開始時にCPU側が初期化する。
+    // 筆に乗っている絵の具(vec4 1個)。
     glGenBuffers(1, &brushPaintSSBO_);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, brushPaintSSBO_);
     {
@@ -186,11 +170,10 @@ void CanvasWidget::initializeGL() {
     }
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-    // シェーダー/テクスチャが揃ったので toolCtx_ を実体で埋め直す
-    // (コンストラクタ時点ではまだ全部nullptr/0だったため)
+    // シェーダー/テクスチャが揃ったので toolCtx_ を実体で埋め直す。
     setupToolContext();
 
-    // FillTool を初期化してテクスチャ/シェーダーを注入
+    // FillTool を初期化してテクスチャ/シェーダーを注入。
     fillTool_.initialize(context());
     fillTool_.setTextures({layerTexBanks[0], maskTex, wallTex, outerJfaTex, innerJfaTex, sdfTex});
     fillTool_.setPrograms({
@@ -211,18 +194,12 @@ void CanvasWidget::initializeGL() {
 
     selectTool_.initialize(context());
 
-    // 色調整/フィルター/変形/キャンバスサイズ系ツールの initialize は
-    // 各 CanvasAction (src/actions/) へ移動。
+    // 色調整/フィルター/変形/キャンバスサイズ系ツールの initialize は各 CanvasAction (src/actions/) へ移動。
     actions_.initializeAll(context());
 
     // ここまででシェーダーのコンパイル/リンクとtoolCtx_の初期化が完了する。
-    // initializeGL()完了前(シェーダーコンパイル中など)にマウス操作が届いても、
-    // 未初期化のtoolCtx_/GL資源に触れてしまわないよう、マウスイベント側で
-    // glReady_をガードに使う。
     glReady_ = true;
-    // 開いた直後の1本目のストロークでも事前合成キャッシュが出来ているように、
-    // ここでも先読み作成を予約しておく(文書の初期化中は doc_->onChanged が
-    // 抑止されているため、ここを入れないと1本目だけ書き始めが重くなる)。
+    // 開いた直後の1本目のストロークでも事前合成キャッシュが出来ているように、ここでも先読み作成を予約しておく(文書の初期化中は doc_->onChanged が抑止されているため、ここを入れないと1本目だけ書き始めが重くなる)。
     scheduleCompositeCachePrewarm();
 
     WINLOG(QStringLiteral("PERF CanvasWidget::initializeGL #%1 total=%2ms (shaders=%3ms textures=%4ms rest=%5ms)")
@@ -233,9 +210,7 @@ void CanvasWidget::initializeGL() {
     emit initialized();
 }
 
-// ===========================================================================
-// テクスチャ初期化
-// ===========================================================================
+// テクスチャ初期化。
 GLuint CanvasWidget::makeTexture2D(GLenum internalFormat, int w, int h, GLenum filter)
 {
     GLuint tex = 0;
@@ -266,23 +241,17 @@ void CanvasWidget::bindLayerBanksForSampling(QOpenGLShaderProgram *prog)
     GLint units[MAX_TILE_BANKS];
     for (int i = 0; i < MAX_TILE_BANKS; i++) {
         glActiveTexture(GL_TEXTURE0 + LAYER_BANK_TEXUNIT_BASE + i);
-        // 未生成バンクのスロットにもbank0を割り当てておく(サンプラー配列の全要素が
-        // 有効なテクスチャを指している必要があるため。実際にサンプルされるのは
-        // si < 生成済み容量 の範囲だけなので中身は問われない)。
+        // 未生成バンクのスロットにもbank0を割り当てておく(サンプラー配列の全要素が有効なテクスチャを指している必要があるため。実際にサンプルされるのはsi < 生成済み容量 の範囲だけなので中身は問われない)。
         glBindTexture(GL_TEXTURE_2D_ARRAY, layerTexBanks[i] ? layerTexBanks[i] : layerTexBanks[0]);
         units[i] = LAYER_BANK_TEXUNIT_BASE + i;
     }
-    // sampler2DArray配列は要素ごとに名前を組み立てず、配列名でまとめて設定する
-    // (要素名を毎回QByteArrayで作ると環境によってはQt内部でアサートに当たるため)。
+    // sampler2DArray配列は要素ごとに名前を組み立てず、配列名でまとめて設定する(要素名を毎回QByteArrayで作ると環境によってはQt内部でアサートに当たるため)。
     prog->setUniformValueArray("layerTexBanks", units, MAX_TILE_BANKS);
     prog->setUniformValue("uSlicesPerBank", slicesPerBank_);
     glActiveTexture(GL_TEXTURE0);
 }
 
 // [base, base+count) の連続グローバルスライス範囲を uClearColor でGPUクリアする。
-// 1回のディスパッチ(layerclear.comp)は image2DArray 1本(=1バンク)に閉じている
-// 必要があるため、バンク境界でセグメントに分割し、各バンクを image unit 1 にバインド
-// して「そのバンク内ローカルなuBaseSlice」で個別にディスパッチする。
 void CanvasWidget::clearSliceRange(int base, int count, float r, float g, float b, float a)
 {
     if (count <= 0 || slicesPerBank_ <= 0) return;
@@ -304,24 +273,12 @@ void CanvasWidget::clearSliceRange(int base, int count, float r, float g, float 
 }
 
 void CanvasWidget::initTextures(bool createDefaultLayers) {
-    // layerTexArrayに確保できるスライス数の上限を、固定の小さい定数ではなく
-    // このGPU/ドライバが実際に許容する最大値(GL_MAX_ARRAY_TEXTURE_LAYERS)から
-    // 決める。これによりPhotoshop同様、キャンバスサイズ・レイヤー数(=タイル数)を
-    // 「VRAM/ドライバの限界まで」増やせるようになる(伸長ロジック自体は
-    // LayerSliceAllocator::grow()が2倍ずつ確保し直す形で既に実装済み)。
-    // MAX_SLICESはOpenGL仕様上の最低保証値なので、問い合わせが異常な値を返した
-    // 場合のフォールバック下限として使う。
-    // 1バンクあたりのスライス数を、固定の小さい定数ではなくGPU/ドライバが実際に
-    // 許容する最大値(GL_MAX_ARRAY_TEXTURE_LAYERS)にする。さらにそのバンクを
-    // 最大 MAX_TILE_BANKS 本まで並べるので、タイル数の上限は実質「VRAM/バンク数」まで
-    // 引き上がる(詳細は CanvasDocument.h / LayerSliceAllocator.h)。MAX_SLICESは
-    // OpenGL仕様上の最低保証値で、問い合わせが異常値を返した場合の下限フォールバック。
+    // layerTexArrayに確保できるスライス数の上限を、固定の小さい定数ではなくこのGPU/ドライバが実際に許容する最大値(GL_MAX_ARRAY_TEXTURE_LAYERS)から決める。
     GLint maxArrayLayers = 0;
     glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxArrayLayers);
     slicesPerBank_ = qMax((int)MAX_SLICES, (int)maxArrayLayers);
 
-    // スライス確保ロジックのセットアップ(バンクテクスチャ群 layerTexBanks[] は
-    // CanvasWidgetが所有し続け、allocatorが生成・伸長・差し替えを行う)。
+    // スライス確保ロジックのセットアップ(バンクテクスチャ群 layerTexBanks[] はCanvasWidgetが所有し続け、allocatorが生成・伸長・差し替えを行う)。
     sliceAllocator_.setup(this, layerTexBanks, TILE_SIZE, slicesPerBank_);
     sliceAllocator_.onTextureRecreated = [this] {
         syncBanksToToolContext();
@@ -330,12 +287,6 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     };
 
     // maskTex (R8)
-    // フィルタはlayerTexArray(GL_LINEAR)に合わせる。ここをGL_NEARESTのままにすると、
-    // ストローク中のプレビュー(render.fragがmaskTexをtexture()でサンプルする経路)だけ
-    // ズーム時にドット単位でカクカクした境界になり、ベイク後(同じアルファ値が
-    // layerTexArrayへ焼き込まれ、GL_LINEARで滑らかに補間される)と見た目が変わってしまう。
-    // ストローク色バッファはキャンバスと寿命を共にするが、使う設定になるまで確保しない
-    // (ensureStrokeColorTex参照)。ここではハンドルを空にしておくだけ。
     strokeColorTex = 0;
 
     glGenTextures(1, &maskTex);
@@ -352,10 +303,7 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
 
     computeMaskClearProgram->bind();
     glBindImageTexture(0, maskTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-    // uDispatchOriginはプログラムオブジェクトに紐づくuniform状態であり、
-    // AirbrushTool(スタンプごとに部分範囲だけ処理するため非ゼロ値を設定する)が
-    // 最後にこのプログラムを使った際の値がそのまま残っていることがある。
-    // ここはキャンバス全域を対象にした呼び出しなので、明示的に(0,0)へ戻す。
+    // uDispatchOriginはプログラムオブジェクトに紐づくuniform状態であり、AirbrushTool(スタンプごとに部分範囲だけ処理するため非ゼロ値を設定する)が最後にこのプログラムを使った際の値がそのまま残っていることがある。
     {
         GLint loc = glGetUniformLocation(computeMaskClearProgram->programId(), "uDispatchOrigin");
         if (loc >= 0) glUniform2i(loc, 0, 0);
@@ -364,10 +312,10 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
     computeMaskClearProgram->release();
 
-    // タイルグリッドを doc に登録
+    // タイルグリッドを doc に登録。
     doc_->initTileGrid(canvasW, canvasH);
  
-    // layerTexArray（mipなし）
+    // layerTexArray（mipなし）。
     sliceAllocator_.createInitial(16);
 
     int mipLevels = 1 + (int)std::floor(std::log2(std::max(canvasW, canvasH)));
@@ -377,18 +325,17 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    // キャッシュ用
+    // キャッシュ用。
     int tileCount = doc_->tilesX() * doc_->tilesY();
 
-    // ナビゲーター用作業テクスチャ(以前は updateCompositedTex() 内で遅延生成していたが、
-    // CanvasCompositor はテクスチャを所有しないため、ここで確保しておく)
+    // ナビゲーター用作業テクスチャ。
     glGenTextures(1, &compositedTileArr);
     glBindTexture(GL_TEXTURE_2D_ARRAY, compositedTileArr);
     glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, TILE_SIZE, TILE_SIZE, tileCount);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    // 塗りつぶし用
+    // 塗りつぶし用。
     wallTex     = makeTexture2D(GL_R8,    canvasW, canvasH);
     outerJfaTex = makeTexture2D(GL_RG16F, canvasW, canvasH);
     innerJfaTex = makeTexture2D(GL_RG16F, canvasW, canvasH);
@@ -396,16 +343,7 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
 
     fullLayerTex = makeTexture2D(GL_RGBA8, canvasW, canvasH);
 
-    // 「アクティブレイヤーより下」の合成結果キャッシュ(item4)。キャンバスサイズに
-    // 連動するので他の canvasW x canvasH テクスチャと同じくここで確保する
-    // (中身は使われる直前に updateBelowCompositeCache() が必ず書くので、
-    // 初期値は未定でよい)。
-    // フィルターは GL_LINEAR にしておく必要がある。これらは render.frag が
-    // 画面表示のために直接サンプリングするテクスチャで、キャッシュを使わない経路が
-    // 読むレイヤーのタイル配列も GL_LINEAR(LayerSliceAllocator参照)だからである。
-    // 既定の GL_NEAREST のままだと、キャッシュが有効になった瞬間(=ストローク開始)に
-    // 表示だけが最近傍補間に切り替わり、キャンバス全体のアンチエイリアスが
-    // 失われたように見える(レイヤー操作やUndoでキャッシュが破棄されると戻る)。
+    // 「アクティブレイヤーより下」の合成結果キャッシュ(item4)。
     belowCompositeTex         = makeTexture2D(GL_RGBA8, canvasW, canvasH, GL_LINEAR);
     belowCompositeClipBaseTex = makeTexture2D(GL_RGBA8, canvasW, canvasH, GL_LINEAR);
     aboveCompositeTex         = makeTexture2D(GL_RGBA8, canvasW, canvasH, GL_LINEAR);
@@ -413,7 +351,7 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     belowCompositeCacheValid_ = false;
     aboveCompositeCacheValid_ = false;
 
-    // 選択範囲マスク(R8)。未選択状態=全域255(どこでも塗れる)で初期化する。
+    // 選択範囲マスク(R8)。
     selectionMaskTex = makeTexture2D(GL_R8, canvasW, canvasH);
     {
         QVector<uint8_t> fullSel(canvasW * canvasH, 255);
@@ -426,13 +364,13 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     hasSelection_ = false;
     invalidateSelectionOutlineCache(); // selectionMaskTex自体を作り直したので古いキャッシュは無効
 
-    // 変形ツール確定時の作業用スナップショット(初期値は使われないので未初期化のままでよい)
+    // 変形ツール確定時の作業用スナップショット(初期値は使われないので未初期化のままでよい)。
     transformSrcTex        = makeTexture2D(GL_RGBA8, canvasW, canvasH);
     transformSrcSelMaskTex = makeTexture2D(GL_R8,    canvasW, canvasH);
     transformScratchW_ = canvasW;
     transformScratchH_ = canvasH;
 
-    // SSBO 初期化 (すべてMAX_LAYERS個ぶん、フラットなレイヤーindexでそのまま引ける)
+    // SSBO 初期化 (すべてMAX_LAYERS個ぶん、フラットなレイヤーindexでそのまま引ける)。
     glGenBuffers(1, &ssboLayerOpacity);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssboLayerOpacity);
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LAYERS * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
@@ -445,8 +383,7 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssboLayerBaseSlice);
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LAYERS * sizeof(int), nullptr, GL_DYNAMIC_DRAW);
 
-    // レイヤーマスクのベーススライス(-1なら無し)。binding=1は他のSSBOと違いテクスチャ/
-    // 画像の名前空間とも重ならない空きスロット(CanvasCompositor.cppのコメント参照)。
+    // レイヤーマスクのベーススライス(-1なら無し)。
     glGenBuffers(1, &ssboLayerMaskBaseSlice);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssboLayerMaskBaseSlice);
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LAYERS * sizeof(int), nullptr, GL_DYNAMIC_DRAW);
@@ -487,14 +424,12 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssboLayerAdjKind);
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LAYERS * sizeof(int), nullptr, GL_DYNAMIC_DRAW);
 
-    // vec3配列はstd430で要素ストライドが16バイト(vec4扱い)になるため、
-    // レイヤーあたりfloat4分(x,y,z,pad)を確保する。
+    // vec3配列はstd430で要素ストライドが16バイト(vec4扱い)になるため、レイヤーあたりfloat4分(x,y,z,pad)を確保する。
     glGenBuffers(1, &ssboLayerAdjParams);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssboLayerAdjParams);
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LAYERS * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
 
-    // フォルダー単位のマスクカスケード用(ivec4、レイヤーあたり最大4階層ぶんの
-    // 祖先フォルダーのマスクベーススライス)。
+    // フォルダー単位のマスクカスケード用(ivec4、レイヤーあたり最大4階層ぶんの祖先フォルダーのマスクベーススライス)。
     glGenBuffers(1, &ssboLayerAncestorMaskSlices);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssboLayerAncestorMaskSlices);
     glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LAYERS * 4 * sizeof(int), nullptr, GL_DYNAMIC_DRAW);
@@ -502,38 +437,31 @@ void CanvasWidget::initTextures(bool createDefaultLayers) {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     // レイヤー作成(この後 CacheAndNotify通知が飛ぶ)より前に toolCtx_ を実体で埋める。
-    // ここまでに作ったテクスチャ/SSBO/シェーダーが出揃っているため。
     setupToolContext();
 
-    // addLayer()自体がdoc_->onChanged経由でupdate()を呼び得るため、
-    // レイヤーがまだ0件のこの時点で誤発火しないよう、
-    // 初期構築が終わるまでは先にガードを立てておく
+    // addLayer()自体がdoc_->onChanged経由でupdate()を呼び得るため。
     if (createDefaultLayers) {
         m_initializing = true;
 
-        // 最初のレイヤーを2枚作成 (下: 常に白い単色レイヤー、上: 透明な作業レイヤー)
+        // 最初のレイヤーを2枚作成 (下: 常に白い単色レイヤー、上: 透明な作業レイヤー)。
         addSolidColorLayer("用紙");
         addLayer("レイヤー1");
         doc_->setActiveLayer(1);
 
         m_initializing = false;
     }
-    // createDefaultLayers=false の場合はレイヤーを1枚も作らずに返す
-    // (キャンバスサイズ変更アクションが、既存レイヤーの中身を復元するため)
+    // createDefaultLayers=false の場合はレイヤーを1枚も作らずに返す。
 
     update();
 }
 
-// ナビゲーター用: 全レイヤー合成して compositedTex を更新
+// ナビゲーター用: 全レイヤー合成して compositedTex を更新。
 void CanvasWidget::updateCompositedTex() {
     makeCurrent();
     compositor_.updateCompositedTex(toolCtx_);
 }
 
-// ===========================================================================
 // 変形確定用の作業テクスチャを、指定サイズに合わせて作り直す
-// (レイヤーの矩形がgrowLayerBoundsで変わるため、キャンバスサイズ固定では足りない)
-// ===========================================================================
 void CanvasWidget::ensureTransformScratchSize(int w, int h)
 {
     if (w == transformScratchW_ && h == transformScratchH_ && fullLayerTex != 0 && transformSrcTex != 0)
@@ -551,9 +479,7 @@ void CanvasWidget::ensureTransformScratchSize(int w, int h)
     toolCtx_.transformSrcTex = transformSrcTex;
 }
 
-// ===========================================================================
-// 多段パスのフィルター用の中間バッファを確保する(CanvasWidget.hのコメント参照)
-// ===========================================================================
+// 多段パスのフィルター用の中間バッファを確保する(CanvasWidget.hのコメント参照)。
 GLuint CanvasWidget::ensureFilterScratch(int w, int h)
 {
     if (w == filterScratchW_ && h == filterScratchH_ && filterScratchTex_ != 0)
@@ -567,10 +493,7 @@ GLuint CanvasWidget::ensureFilterScratch(int w, int h)
     return filterScratchTex_;
 }
 
-// ===========================================================================
-// レイヤーの矩形を、キャンバスタイル座標系で指定範囲を覆うように拡張する
-// (CanvasDocument::growLayerBoundsへ委譲し、GPU側のタイルコピー/クリアを担当する)
-// ===========================================================================
+// レイヤーの矩形を、キャンバスタイル座標系で指定範囲を覆うように拡張する。
 bool CanvasWidget::growLayerBoundsToCoverCanvasTiles(int layerIndex, int minTx, int minTy, int maxTxEx, int maxTyEx)
 {
     if (!doc_) return false;
@@ -589,14 +512,11 @@ bool CanvasWidget::growLayerBoundsToCoverCanvasTiles(int layerIndex, int minTx, 
     return grew;
 }
 
-// ===========================================================================
-// リサイズ / 描画
-// ===========================================================================
+// リサイズ / 描画。
 void CanvasWidget::resizeGL(int w, int h) {
-    // モニター間の移動や表示スケール変更でDPRが変わるので、ここで追従させる
-    // (ツール側はこの値でマウス座標をビュー空間へ換算する)。
+    // モニター間の移動や表示スケール変更でDPRが変わるので、ここで追従させる(ツール側はこの値でマウス座標をビュー空間へ換算する)。
     toolCtx_.viewDpr = viewDpr();
-    // w/hは論理px。実際のFBO用viewportはpaintGL()冒頭で物理pxへ明示的に揃える。
+    // w/hは論理px。
     Q_UNUSED(w);
     Q_UNUSED(h);
     fitCanvasToView();
@@ -605,7 +525,7 @@ void CanvasWidget::resizeGL(int w, int h) {
 
 void CanvasWidget::fitCanvasToView()
 {
-    // ビューはデバイスピクセルで動く(CanvasWidget.hのviewDpr()のコメント参照)
+    // ビューはデバイスピクセルで動く(CanvasWidget.hのviewDpr()のコメント参照)。
     const float w = viewWidth();
     const float h = viewHeight();
     if (w <= 0.0f || h <= 0.0f) return;
@@ -615,7 +535,7 @@ void CanvasWidget::fitCanvasToView()
     float s = qMin(scaleX, scaleY) * 0.9f;
 
     view_.setScale(s);
-    // キャンバス中心をウィジェット中心に合わせる
+    // キャンバス中心をウィジェット中心に合わせる。
     view_.setOffset(QVector2D(
         w / 2.0f - (canvasW / 2.0f) * s,
         h / 2.0f - (canvasH / 2.0f) * s
@@ -642,15 +562,7 @@ void CanvasWidget::setFlippedX(bool flip)
 {
     if (view_.flipX() == flip) return;
 
-    // ViewTransform::matrix()は「回転→スケール(反転)→平行移動(offset)」の順で
-    // 合成されており(T*S*R)、offsetは最後に screen 空間へそのまま足される。
-    // そのため反転(xスケールの符号反転)だけをそのまま行うと、キャンバス原点(0,0)が
-    // 画面上のどこにあるか(=offset.x)を軸にミラーされてしまい、パンしていると
-    // 変な位置を軸に反転して見える。
-    // screen = offset + S(±scale,scale)*R(rot)*canvasPos なので、反転前後で
-    // 「現在画面中央に映っている点」が画面中央に留まるようにするには、
-    // offset.x を ウィジェット幅基準で鏡映(offset.x -> width - offset.x)させれば
-    // よい(この補正はoffset.yやcanvasPos自体に依存しない、常に成り立つ関係式)。
+    // ViewTransform::matrix()は「回転→スケール(反転)→平行移動(offset)」の順で合成されており(T*S*R)、offsetは最後に screen 空間へそのまま足される。
     QVector2D off = view_.offset();
     off.setX(viewWidth() - off.x()); // offsetはビュー空間(デバイスpx)
     view_.setOffset(off);
@@ -663,7 +575,7 @@ void CanvasWidget::setFlippedX(bool flip)
 QPolygonF CanvasWidget::visibleCanvasRectPolygon() const
 {
     QPolygonF poly;
-    // ビュー空間(デバイスpx)の四隅
+    // ビュー空間(デバイスpx)の四隅。
     const QPointF corners[4] = {
         QPointF(0, 0), QPointF((qreal)viewWidth(), 0),
         QPointF((qreal)viewWidth(), (qreal)viewHeight()), QPointF(0, (qreal)viewHeight())
@@ -677,9 +589,8 @@ QPolygonF CanvasWidget::visibleCanvasRectPolygon() const
 
 void CanvasWidget::panByCanvasDelta(const QVector2D &canvasDeltaYDown)
 {
-    // visibleCanvasRectPolygon()と同じ規則(Y下向き⇔ViewTransform内部のY上向き)で
-    // 符号を揃えてから、平行移動を除いた線形部分(回転・拡縮・左右反転)だけを
-    // screen空間(offset_と同じ座標系)へ写像し、offsetに加算する。
+    // visibleCanvasRectPolygon()と同じ規則(Y下向き⇔ViewTransform内部のY上向き)で符号を揃えてから、
+    // 平行移動を除いた線形部分(回転・拡縮・左右反転)だけをscreen空間(offset_と同じ座標系)へ写像し、offsetに加算する。
     const QVector2D canvasDeltaYUp(canvasDeltaYDown.x(), -canvasDeltaYDown.y());
     const QVector3D screenDelta = view_.matrix().mapVector(QVector3D(canvasDeltaYUp, 0.0f));
     view_.setOffset(view_.offset() + QVector2D(screenDelta.x(), screenDelta.y()));
@@ -704,27 +615,19 @@ void CanvasWidget::noteStrokeDirtyRegion(float minX, float minY, float maxX, flo
 
 void CanvasWidget::paintGL() {
 
-    // Qtが設定するviewportは小数DPRで切り捨てられることがあり、実際のFBOより
-    // 1px以上小さくなる。さらにドック操作でQOpenGLWidgetが拡大した直後には古い
-    // viewportが残る環境があり、増えた領域が黒い帯になる。毎フレーム、Qtと同じ
-    // 丸め方でFBO全体へ明示的に揃える。
+    // Qtが設定するviewportは小数DPRで切り捨てられることがあり、実際のFBOより1px以上小さくなる。
     const qreal currentDpr = devicePixelRatioF();
     glViewport(0, 0, qMax(1, qRound(width() * currentDpr)),
                      qMax(1, qRound(height() * currentDpr)));
 
     paintGlCalls_++;
-    // ドラッグ中に、こちらが呼んだ同期repaint()以外の経路(どこかのupdate())で
-    // 描かれたフレーム。同じ絵をもう1枚描くだけの無駄で、1枚につきウィンドウ全体の
-    // 再合成とpresentが増える。ここが並ぶようなら、その update() を止められないかを
-    // 疑うこと(inputFlushTimer_ / requestRepaint の各コメント参照)。
+    // ドラッグ中に、こちらが呼んだ同期repaint()以外の経路(どこかのupdate())で描かれたフレーム。
     if (!inSyncRepaint_ && WinLog::enabled() && viewDiagCount_ < 40) {
         viewDiagCount_++;
         WINLOG(QStringLiteral("PERF view: 余分なpaintGL(update由来)"));
     }
 
     // 計測用(初回のみ): 実際に描き込んでいるフレームバッファの画素数を問い合わせる。
-    // ここが「ウィジェットの論理サイズ」なのか「デバイスピクセル(論理×DPR)」なのかで、
-    // キャンバスが実画素どおりに出ているかが決まる。
     if (WinLog::enabled()) {
         static bool logged = false;
         if (!logged) {
@@ -747,8 +650,7 @@ void CanvasWidget::paintGL() {
             WINLOG(QStringLiteral("PERF paintGL: FBO=%1x%2 viewport=%3x%4 widget(logical)=%5x%6 dpr=%7")
                        .arg(fbW).arg(fbH).arg(vp[2]).arg(vp[3])
                        .arg(width()).arg(height()).arg(devicePixelRatioF()));
-            // presentが1回30ms近くかかっている件の切り分け用。ここが1なら、
-            // main.cppでswapInterval(0)にしたつもりが効いていない(=垂直帰線待ち)。
+            // presentが1回30ms近くかかっている件の切り分け用。
             const QWindow *topWin = window() ? window()->windowHandle() : nullptr;
             WINLOG(QStringLiteral("PERF swapInterval: default=%1 widgetCtx=%2 topWindow=%3")
                        .arg(QSurfaceFormat::defaultFormat().swapInterval())
@@ -757,48 +659,26 @@ void CanvasWidget::paintGL() {
         }
     }
 
-    // paintGL本体の所要時間。ストローク中の同期描画間隔の適応に使う
-    // (CanvasWidget.hのlastPaintGlCostNs_のコメント参照。repaint()全体の時間ではなく
-    //  ここを測るのが要点)。
+    // paintGL本体の所要時間。
     QElapsedTimer paintClock;
     paintClock.start();
     const bool logPaint = WinLog::enabled() && strokeFrameLogCount_ < 12;
 
-    // 【重要】Qtがこのフレーム用に束縛したFBOを控えておく。
-    //
-    // この関数はこの後 flushPendingInput() と prepareCompositeBase() を呼ぶが、
-    // その先(StrokeUndoRecorder::expandRegion のタイル読み戻し、AirbrushToolの
-    // スタンプ焼き込み、CanvasCompositorの各種オフスクリーン合成)は一時FBOを使い、
-    // 後始末でフレームバッファのバインドを 0 に戻す。それらは元々「マウスイベント
-    // 処理中に呼ばれる(=次のpaintGL()が改めて自前のFBOを束縛し直す)」前提で
-    // 書かれていたが、実際にはこの関数の中からも呼ばれる経路がある。
-    // 戻さないままだと、このフレームのclear/drawがウィジェットのFBOではなく
-    // フレームバッファ0へ行き、描画結果がまるごと捨てられる。
-    // 症状: ストローク開始直後の部分再描画(シザー)が画面に出ず、あとで全面
-    // 再描画が来たときに初めてポンと現れる。以前は毎フレーム余分な全面再描画が
-    // 走っていたためそれに隠れていたが、その無駄を削った結果表に出た。
+    // Qtがこのフレーム用に束縛したFBOを保持する。
     GLint prevDrawFbo = 0, prevReadFbo = 0;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDrawFbo);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
 
-    // フレームレート律速バッチ(Tool::flushPendingInput参照)。ペンタブの高頻度
-    // サンプルをonMouseMove()側で貯めておき、実際に画面を更新するこのタイミングで
-    // まとめて1回だけGPUディスパッチする(この中からnoteStrokeDirtyRegion()が
-    // 呼ばれて下のシザー矩形が更新されるため、必ずシザー計算より先に行う)。
+    // フレームレート律速バッチ(Tool::flushPendingInput参照)。
     if (Tool *t = currentTool()) t->flushPendingInput(toolCtx_);
 
-    // ストローク中の部分再描画: 前回paint以降に実際に変更されたキャンバス領域が
-    // 分かっている場合、その矩形(+マージン)だけをシザーで描き直し、残りは前フレームの
-    // FBO内容(PartialUpdate)をそのまま使う。1回の描画コストが「ウィンドウ全画素×
-    // アクティブ以上のレイヤー数」から「ブラシ周辺×同」へ激減し、レイヤー数や
-    // ウィンドウサイズにほぼ依存しなくなる(他のペイントソフトと同じダーティ矩形方式)。
+    // ストローク中の部分再描画: 前回paint以降に実際に変更されたキャンバス領域が分かっている場合、その矩形(+マージン)だけをシザーで描き直し、残りは前フレームのFBO内容(PartialUpdate)をそのまま使う。
     bool partialPaint = false;
     int  scissorW = 0, scissorH = 0; // 診断ログ用
     if (strokeDirtyValid_) {
         Tool *t = currentTool();
         if (t && t->isActive()) {
-            // キャンバスpx(Y上向き) → ウィジェット座標。回転・反転があっても正しく
-            // 覆えるよう、矩形の4隅を変換してそのバウンディングボックスをとる。
+            // キャンバスpx(Y上向き) → ウィジェット座標。
             const QPointF c0 = toolCtx_.pixelToWidget(QVector2D(strokeDirtyMinX_, strokeDirtyMinY_));
             const QPointF c1 = toolCtx_.pixelToWidget(QVector2D(strokeDirtyMaxX_ + 1.0f, strokeDirtyMinY_));
             const QPointF c2 = toolCtx_.pixelToWidget(QVector2D(strokeDirtyMinX_, strokeDirtyMaxY_ + 1.0f));
@@ -809,7 +689,7 @@ void CanvasWidget::paintGL() {
             const qreal wx1 = qMax(qMax(c0.x(), c1.x()), qMax(c2.x(), c3.x())) + margin;
             const qreal wy1 = qMax(qMax(c0.y(), c1.y()), qMax(c2.y(), c3.y())) + margin;
 
-            // ウィジェット座標(Y下向き) → FBO座標(Y上向き、物理px)
+            // ウィジェット座標(Y下向き) → FBO座標(Y上向き、物理px)。
             const qreal dpr = devicePixelRatioF();
             const int fbW = qMax(1, (int)std::lround(width()  * dpr));
             const int fbH = qMax(1, (int)std::lround(height() * dpr));
@@ -830,18 +710,13 @@ void CanvasWidget::paintGL() {
     }
     strokeDirtyValid_ = false;
 
-    // フィルターレイヤーがある文書では、ここでオフスクリーンの連鎖を組み直して
-    // 「どこまで合成済みか」と、その結果テクスチャを受け取る。フィルターが無ければ
-    // 従来通りストローク中の下キャッシュだけを見る(戻り値<0で事前合成なし)。
-    // renderProgram をbindする前に済ませること(内部で別のプログラムをbindするため)。
+    // フィルターレイヤーがある文書では、ここでオフスクリーンの連鎖を組み直して「どこまで合成済みか」と、その結果テクスチャを受け取る。
     GLuint compositeBaseTex     = belowCompositeTex;
     GLuint compositeBaseClipTex = belowCompositeClipBaseTex;
     const int compositeStartZ   = prepareCompositeBase(compositeBaseTex, compositeBaseClipTex);
     const qint64 nsAfterBase    = logPaint ? paintClock.nsecsElapsed() : 0;
 
-    // 上のflushPendingInput()/prepareCompositeBase()が一時FBOを使って
-    // バインドを外していたら、ここでこのフレーム用のFBOへ戻す(理由は関数冒頭の
-    // prevDrawFbo のコメント参照)。以降のclear/drawがこのFBOへ入る。
+    // 上のflushPendingInput()/prepareCompositeBase()が一時FBOを使ってバインドを外していたら、ここでこのフレーム用のFBOへ戻す(理由は関数冒頭のprevDrawFbo のコメント参照)。
     {
         GLint nowDraw = 0, nowRead = 0;
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &nowDraw);
@@ -872,37 +747,14 @@ void CanvasWidget::paintGL() {
     renderProgram->setUniformValue("uIsEditingMaskLayer",
         (editingMaskLayerIndex_ >= 0 && editingMaskLayerIndex_ == doc_->activeLayerIndex()) ? 1 : 0);
     renderProgram->setUniformValue("uCanvasSize",        QVector2D(canvasW, canvasH));
-    // ビューポート(=FBO)はデバイスピクセルなので、ここも合わせる。論理pxを渡すと
-    // 拡大率1.0でも常にDPR倍へ拡大リサンプルされる(CanvasWidget.hのviewDpr()参照)。
+    // ビューポート(=FBO)はデバイスピクセルなので、ここも合わせる。
     renderProgram->setUniformValue("uWindowSize",        QVector2D(viewWidth(), viewHeight()));
-    // 拡大表示中だけ画素中心へ吸着させる判定に使う(render.frag の uViewScale 参照)
+    // 拡大表示中だけ画素中心へ吸着させる判定に使う(render.frag の uViewScale 参照)。
     renderProgram->setUniformValue("uViewScale",         view_.scale());
-    // 縮小表示時の面積平均のサンプル数(1辺)。1画素が覆うキャンバスpxぶんを刻む。
-    // 縮小するほどキャンバスが占める画面画素数は倍率の二乗で減るので、
-    // 1画素あたりのサンプル数を1/倍率まで増やしても画面全体の処理量はほぼ一定。
-    // 上限4は保険(極端な縮小でサンプル数が爆発しないように)。
+    // 縮小表示時の面積平均のサンプル数(1辺)。
     int minifySamples = qBound(1, (int)std::ceil(1.0f / qMax(view_.scale(), 0.0001f)), 4);
 
-    // 【重要】キャンバスを移動/回転している間は1点サンプルまで落とす。
-    //
-    // このサンプル数は1画面画素あたりの composeCanvasAt() 呼び出し回数を
-    // 二乗で増やす(3なら9回、上限の4なら16回)。実測(35%表示・キャンバス全面)で
-    // この描画のGPU実処理は
-    //     minify=1 → 約10ms / minify=2 → 約29ms / minify=3 → 約60ms
-    // で、ほぼサンプル数の二乗に比例していた(TIEPOLO_GLFINISH=1 で実測)。ビュー変換のドラッグ中は
-    // 毎フレーム全面を描き直す(ストロークのような部分再描画が効かない)ので、
-    // これがそのまま1フレームの時間になり、60ms=約16fpsまで落ちる。これが
-    // 「ビュー変換がカクつく」の本体だった。
-    //
-    // 面積平均は「止まっている絵の斜め線を階段状に見せない」ための品質処理で、
-    // 動かしている最中は見えない。動かしている間だけ落とし、指を離した時点の
-    // 再描画(mouseReleaseEvent)で本来の品質に戻す。
-    //
-    // 【計測の注意】paintGL本体の所要時間(lastPaintGlCostNs_)にはこのコストは
-    // 現れない。GLの呼び出しは非同期で、CPUは命令を積んだら戻ってくるため
-    // (実測0.3ms)。GPUの実処理はその後のpresentで待たされる形で現れるので、
-    // 一見「Qtのウィンドウ合成が遅い」ように見える。切り分けるには
-    // TIEPOLO_GLFINISH=1 を使うこと(下の glFinish のところ)。
+    // 移動・回転中は1点サンプルへ落とす。
     if (Tool *t = currentTool(); t && t->isActive() && t->transformsViewWhileActive())
         minifySamples = 1;
     renderProgram->setUniformValue("uMinifySamples", minifySamples);
@@ -918,8 +770,7 @@ void CanvasWidget::paintGL() {
     renderProgram->setUniformValue("uTileSize",          TILE_SIZE);
     renderProgram->setUniformValue("uCanvasTilesX",      doc_->tilesX()); // レイヤーマスクのタイル参照(常にキャンバス全体)用
 
-    // ブラシ色。消しゴムツールと透明色は「消す」動作になり、そのときの uBrushColor.a は
-    // 色の不透明度ではなく「消す強さ」を表す(ToolConfig.h の EraseBrush / bake.comp 参照)。
+    // ブラシ色。
     const float brushOpacity = (activeTool == ToolType::Airbrush) ? toolCfg_->airbrush().opacity()
                                                                   : toolCfg_->pen().opacity();
     const EraseBrush erase = eraseBrushFor(activeTool == ToolType::Eraser,
@@ -930,7 +781,7 @@ void CanvasWidget::paintGL() {
     // ブラシの合成モードはペン専用の設定(消す動作のときは意味を持たない)。
     renderProgram->setUniformValue("uBrushBlendMode",
         (activeTool == ToolType::Pen && !erase.active) ? toolCfg_->pen().brushBlendMode() : 0);
-    // スタンプごとの色(色のランダム等)。焼き込み側(PenEraserTool)と同じ判定にする。
+    // スタンプごとの色(色のランダム等)。
     const bool useStrokeColor = (activeTool == ToolType::Pen && !erase.active
                                  && toolCfg_->pen().usesPerStampColor() && strokeColorTex != 0);
     renderProgram->setUniformValue("uUseStrokeColor", useStrokeColor ? 1 : 0);
@@ -942,11 +793,7 @@ void CanvasWidget::paintGL() {
     renderProgram->setUniformValue("uBrushColor",
         col.redF(), col.greenF(), col.blueF(), col.alphaF());
 
-    // レイヤーマスク編集中のライブプレビュー用。焼き込み側(PenEraserTool::onMouseRelease /
-    // AirbrushTool::stampAndBake)がbake.compへ渡すのと同じ色をシェーダーへ渡し、
-    // render.frag側で同じ式を先回りして「焼き込んだらこうなる」マスクを表示させる
-    // (両者がずれるとプレビューと確定結果が食い違う。MaskBrush.hのコメント参照)。
-    // マスクは色ではなく濃淡なので、「消す」ときは黒(=隠す)へその強さで寄せる。
+    // レイヤーマスク編集中のライブプレビュー用。
     QColor maskCol = erase.active
         ? maskBrushColor(true, toolCfg_->color().rawRGBA(), erase.strength)
         : maskBrushColor(false, toolCfg_->color().rawRGBA(), brushOpacity);
@@ -956,21 +803,13 @@ void CanvasWidget::paintGL() {
     renderProgram->setUniformValue("uHasSelection",    hasSelection_ ? 1 : 0);
     renderProgram->setUniformValue("uIsSelectionTool", (activeTool == ToolType::Selection) ? 1 : 0);
 
-    // 変形/自由変形/色調整/フィルター系(拡大・縮小・回転/自由変形/色相・彩度・明度/
-    // 明るさ・コントラスト/カラーバランス/トーンカーブ/ガウスぼかし/モザイク/
-    // カスタムシェーダー/色収差)の uIsXxxTool + origin/size 等の uniform は、
-    // 各 CanvasAction (src/actions/) の applyRenderState() へ移動した。非アクティブな
-    // アクションも自分の uniform を 0 に戻すため、登録済み全アクションに対して
-    // 毎フレーム呼ぶ(コントローラ側の実装を参照)。
+    // 変形/自由変形/色調整/フィルター系。
     actions_.applyRenderState(renderProgram);
 
     // 表示上の見た目だけを変えるカラーモード(RGB/CMYK擬似/グレースケール)。
-    // ツールのactivate/deactivateとは無関係に、常にtoolCfg_->colorMode()の現在値を反映する。
     renderProgram->setUniformValue("uColorMode", (int)toolCfg_->colorMode().mode());
 
-    // モニターキャリブレーション。値域はBrightnessContrastTool/ColorBalanceToolと
-    // 同じ-100〜100の整数なので、同じ換算式でfloatに直す(CanvasWidget.cpp内の
-    // uBrightnessShift/uContrastFactor/uCyanShift等の設定箇所と揃えてある)。
+    // モニターキャリブレーション。
     const CalibrationConfig &cal = toolCfg_->calibration();
     renderProgram->setUniformValue("uCalBrightness", cal.brightness() / 200.0f);
     renderProgram->setUniformValue("uCalContrast",   1.0f + cal.contrast() / 100.0f);
@@ -978,9 +817,7 @@ void CanvasWidget::paintGL() {
     renderProgram->setUniformValue("uCalMagenta",    cal.magenta() / 100.0f);
     renderProgram->setUniformValue("uCalYellow",     cal.yellow()  / 100.0f);
 
-    // キャンバス外側の背景色(実データには無関係の表示設定)。マスク編集中は
-    // UI共通の淡いブルーへ切り替え、描画先がレイヤー本体かマスクかをキャンバスを
-    // 見るだけで判別できるようにする。文書の画素・保存データには影響しない。
+    // キャンバス外側の背景色(実データには無関係の表示設定)。
     {
         const QColor bg = editingMaskLayerIndex_ >= 0
             ? Theme::accentHoverLight
@@ -989,15 +826,13 @@ void CanvasWidget::paintGL() {
             QVector3D(bg.redF(), bg.greenF(), bg.blueF()));
     }
 
-    // 市松模様の2色(先端画像プレビュー・レイヤープレビューと共通のTheme値)
+    // 市松模様の2色(先端画像プレビュー・レイヤープレビューと共通のTheme値)。
     renderProgram->setUniformValue("uCheckerColorA",
         QVector3D(Theme::checkerDark.redF(), Theme::checkerDark.greenF(), Theme::checkerDark.blueF()));
     renderProgram->setUniformValue("uCheckerColorB",
         QVector3D(Theme::checkerLight.redF(), Theme::checkerLight.greenF(), Theme::checkerLight.blueF()));
 
     // binding 番号は render.frag の layout(binding=N) に合わせる。
-    // タイル配列(旧 layerTexArray)は複数バンクへ分割されたので、専用ヘルパーで
-    // ユニット8..15へまとめてバインドし sampler2DArray 配列 uniform を設定する。
     bindLayerBanksForSampling(renderProgram);
     renderProgram->setUniformValue("maskTex",           2);
     renderProgram->setUniformValue("selectionMaskTex",  3);
@@ -1025,11 +860,8 @@ void CanvasWidget::paintGL() {
     glActiveTexture(GL_TEXTURE7);
     glBindTexture(GL_TEXTURE_2D, compositeBaseClipTex);
 
-    // item4: ストローク中(PenEraserToolがupdateBelowCompositeCache()で埋めた間)は、
-    // 「アクティブレイヤーより下」をキャッシュテクスチャから読み、render.frag側は
-    // z=アクティブレイヤー以降だけを合成し直す。フィルターレイヤーがある文書では
-    // 代わりに連鎖の結果(=一番上のフィルターレイヤーまで合成済み)から始める。
-    // どちらでもなければ毎フレーム通常通りz=0から全レイヤーを合成する。
+    // ストローク中はアクティブレイヤーより下をキャッシュから読む。
+    // render.frag側はz=アクティブレイヤー以降だけを合成し直す。
     renderProgram->setUniformValue("uUseBelowCompositeCache", compositeStartZ >= 0 ? 1 : 0);
     renderProgram->setUniformValue("uCompositeStartZ",        compositeStartZ >= 0 ? compositeStartZ : 0);
     renderProgram->setUniformValue("uUseAboveCompositeCache", aboveCompositeCacheValid_ ? 1 : 0);
@@ -1038,14 +870,7 @@ void CanvasWidget::paintGL() {
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
 
-    // 【計測用】TIEPOLO_GLFINISH=1 のときだけ有効。
-    //
-    // GLの呼び出しは非同期なので、paintGL本体の所要時間にはGPUの実処理が含まれない
-    // (CPUが命令を積むまでの時間しか測れていない。実測0.3ms)。実処理はその後の
-    // presentで待たされる形で現れるため、放っておくと「Qtのウィンドウ合成が遅い」と
-    // 誤読する ―― 実際その取り違えをした。ここで待たせると、この描画のGPU実処理が
-    // paintGL 側に現れて切り分けられる(常用すると描画が直列化して遅くなるので、
-    // 計測のときだけ付けること)。
+    // TIEPOLO_GLFINISH=1のときだけGPU待ち時間を計測する。
     if (qEnvironmentVariableIsSet("TIEPOLO_GLFINISH")) {
         QElapsedTimer gpuClock;
         gpuClock.start();
@@ -1067,28 +892,18 @@ void CanvasWidget::paintGL() {
 
     if (partialPaint) {
         // 部分再描画のときはQPainterオーバーレイ(選択範囲の破線等)は描き直さない。
-        // 前フレームのFBOに描かれた分がそのまま残っており、ストローク中に
-        // オーバーレイの形状は変わらないため見た目は維持される(破線のアニメーション
-        // だけ一時停止するが実害はない)。ストローク終了後の通常paintで再開する。
         glDisable(GL_SCISSOR_TEST);
         lastPaintGlCostNs_ = paintClock.nsecsElapsed();
         paintGlNsAccum_ += lastPaintGlCostNs_;
         return;
     }
 
-    // 投げ縄選択の軌跡プレビューなど、GLの描画が終わった後にQPainterで重ねる
-    // オーバーレイ(ほとんどのツールはpaintOverlay()が空実装なので何も描かれない)。
-    // 変形アクション実行中はactiveToolに関係なくtransformTool_の枠を描く。
-    //
-    // 【試して駄目だったこと】ビュー変換のドラッグ中にこのブロックを丸ごと省いて
-    // みたが、1フレームは 22.5ms → 22.4ms でまったく変わらなかった(2026-08-12)。
-    // ここは重くない。
+    // 投げ縄選択の軌跡プレビューなど、GLの描画が終わった後にQPainterで重ねるオーバーレイ(ほとんどのツールはpaintOverlay()が空実装なので何も描かれない)。
     {
         QPainter painter(this);
         paintSelectionOutline(painter);
         if (!actions_.paintActiveOverlay(painter, toolCtx_)) {
-            // controller管理アクション(変形/自由変形/キャンバスサイズ/色収差の円形ハンドル等)
-            // が何も描かなければ、通常ツールのオーバーレイを描く。
+            // controller管理アクション(変形/自由変形/キャンバスサイズ/色収差の円形ハンドル等)が何も描かなければ、通常ツールのオーバーレイを描く。
             if (Tool *t = currentTool()) t->paintOverlay(painter, toolCtx_);
         }
     }
@@ -1096,12 +911,7 @@ void CanvasWidget::paintGL() {
     paintGlNsAccum_ += lastPaintGlCostNs_;
 }
 
-// 選択範囲マスク(selectionMaskTex)の境界形状(キャンバスpx座標系)をキャッシュへ
-// 再計算する。QRegion(QBitmap::fromImage(...))で境界を求めることで、投げ縄/ペン選択の
-// ような任意形状にも正しく対応する。selectionMaskTexの中身が実際に変わった時
-// (selectAll/clearSelection/投げ縄・ペン選択の確定等)だけ呼べばよい重い処理
-// (glGetTexImage+全ピクセル走査+QRegion分解)なので、paintSelectionOutline()から
-// 分離してある。
+// 選択範囲マスク(selectionMaskTex)の境界形状(キャンバスpx座標系)をキャッシュへ再計算する。
 void CanvasWidget::rebuildSelectionOutlineCache()
 {
     QVector<uint8_t> buf(canvasW * canvasH);
@@ -1122,23 +932,14 @@ void CanvasWidget::rebuildSelectionOutlineCache()
     }
 
     const QRegion region(QBitmap::fromImage(maskImg));
-    // QBitmap::fromImage()は全面白(=全域選択。全選択アクション直後がこれにあたる)の
-    // 画像を変換すると空のQRegionになる(QBitmapは伝統的に「黒=set」の解釈を持つため、
-    // 全白画像には有効ビットが1つも無いと判定される)。ここでhasSelection_は既にtrueと
-    // 分かっているため(関数冒頭でfalseなら早期return済み)、regionが空ならそれは
-    // 「選択が無い」のではなく「キャンバス全域が選択されている」ことを意味する。
-    // その場合はキャンバス全体を囲む矩形を輪郭として使う。
+    // QBitmap::fromImage()は全面白(=全域選択。全選択アクション直後がこれにあたる)の画像を変換すると空のQRegionになる(QBitmapは伝統的に「黒=set」の解釈を持つため、
+    // 全白画像には有効ビットが1つも無いと判定される)。
     QPainterPath canvasPath;
     if (region.isEmpty()) {
         canvasPath.addRect(0, 0, canvasW, canvasH);
     } else {
         canvasPath.addRegion(region);
-        // addRegion()は矩形の集合(1走査行の連続run単位でまとめられるため、斜めの辺を
-        // 持つ形状だと行ごとに別々の矩形になり、多いと数百枚)をそのまま返す。この矩形群を
-        // simplified()せずに輪郭線として描画すると、隣り合う矩形どうしの内部辺(本来は
-        // 見えるべきでない、形状内部の水平な仕切り線)まで大量に重なって描かれてしまい、
-        // 選択範囲の縦幅ぶんが太い帯のように潰れて見えてしまっていた。simplified()で
-        // 矩形群を1つの輪郭(外周だけ)に統合してから描画する。
+        // addRegion()は矩形の集合(1走査行の連続run単位でまとめられるため、斜めの辺を持つ形状だと行ごとに別々の矩形になり、多いと数百枚)をそのまま返す。
         canvasPath = canvasPath.simplified();
     }
 
@@ -1154,23 +955,10 @@ void CanvasWidget::paintSelectionOutline(QPainter &painter)
         selectionOutlineCacheDirty_ = false;
     }
 
-    // 変形中は selectionMaskTex 自体がまだ動いていない(確定時に transform.comp が
-    // 動かす)ため、輪郭キャッシュも元の位置のまま。何もしないとドラッグ中だけ点線が
-    // 取り残されるので、アクティブなアクションに各点をプレビューと同じ変換で写して
-    // もらう(CanvasAction::mapSelectionOutlinePoint参照。変形系以外は何もしない)。
+    // 変形中は selectionMaskTex 自体がまだ動いていない(確定時に transform.comp が動かす)ため、輪郭キャッシュも元の位置のまま。
     CanvasAction *activeAct = actions_.activeAction();
 
-    // 【軽量化】ウィジェット座標へ変換したパスをキャッシュする。
-    //
-    // 輪郭キャッシュ(selectionOutlineCachePx_)はキャンバスpx座標系なので、描くには
-    // ウィジェット座標へ移す必要がある。以前はこれを毎フレーム「点ごとに」やっていたが、
-    // ペンで作った選択範囲はQRegion由来で数千セグメントになるため、この作り直しだけで
-    // 1フレーム十数msかかっていた(実測で paintGL の97%がこのオーバーレイだった)。
-    //
-    // 実際にパスが変わるのは「選択範囲そのものが変わった(dirtyフラグ)」「ビュー変換が
-    // 変わった(パン・ズーム・回転・反転)」「ウィジェットサイズが変わった」ときだけ。
-    // 投げ縄のドラッグ中はどれも変わらないので、作り直しは完全に無駄だった。
-    // 変形アクション中だけは毎フレーム写る位置が変わるのでキャッシュしない。
+    // ウィジェット座標へ変換したパスをキャッシュする。
     const QMatrix4x4 viewMatrix = view_.matrix();
     const bool mapsPerFrame = (activeAct != nullptr); // 変形系はドラッグ中パスが動く
     if (!selectionOutlineWidgetPathValid_ || mapsPerFrame
@@ -1188,14 +976,12 @@ void CanvasWidget::paintSelectionOutline(QPainter &painter)
         selectionOutlineWidgetPath_     = widgetPath;
         selectionOutlineWidgetPathView_ = viewMatrix;
         selectionOutlineWidgetPathSize_ = size();
-        // 変形中は次フレームも作り直す必要があるのでキャッシュ有効にはしない
+        // 変形中は次フレームも作り直す必要があるのでキャッシュ有効にはしない。
         selectionOutlineWidgetPathValid_ = !mapsPerFrame;
     }
     const QPainterPath &widgetPath = selectionOutlineWidgetPath_;
 
-    // マーチングアンツはQRegionの境界(=軸平行の1px線)なので、アンチエイリアスを
-    // 掛けても見た目はほぼ変わらないのに、数千セグメントの破線ストロークでは
-    // ラスタライズ費用が跳ね上がる。切っておく。
+    // マーチングアンツはQRegionの境界(=軸平行の1px線)なので、アンチエイリアスを掛けても見た目はほぼ変わらないのに、数千セグメントの破線ストロークではラスタライズ費用が跳ね上がる。
     painter.setRenderHint(QPainter::Antialiasing, false);
     painter.setBrush(Qt::NoBrush);
 
@@ -1218,23 +1004,4 @@ void CanvasWidget::setLayerUniformsForRender(QOpenGLShaderProgram *prog)
     compositor_.setLayerUniformsForRender(toolCtx_, prog);
 }
 
-// ===========================================================================
 // マウスイベント
-// ===========================================================================
-// mousePressEvent/mouseMoveEventのどちらでも使う、このイベントに適用すべき筆圧。
-//
-// 以前はQMouseEvent::source()で「タブレット由来の合成イベントか、素のマウスか」を
-// 判定し(NotSynthesizedなら素のマウスとみなして1.0にリセット)、素のマウスならば
-// event->points().first().pressure()を、そうでなければtabletEvent()由来の値を
-// 使い分けていた。しかしWindows環境ではOSのペン→マウス互換レイヤーが、Qtが
-// タブレットイベントから合成する正規のマウスイベントとは別に、同じ物理接触に対して
-// 本物の(=event->source()では区別が付かない)マウスイベントを重複して送ってくる
-// ことがある。この重複イベントのpoints().first().pressure()は実際の筆圧を反映して
-// いないことが多く、従来のロジックでは「タブレットで描いている最中なのに素の
-// マウス操作と誤認してフル筆圧(1.0)を使ってしまう」ことがあった
-// (書き始め・ストローク中を問わず、太い点が混じる不具合の原因)。
-//
-// tabletEvent()は同じ物理サンプルについて必ずこれらマウスイベントより先に届き、
-// 実際のハードウェア筆圧を直接持っている。直近(数十ms以内)にtabletEvent()が
-// 届いていればそれを信頼できるタブレット操作中とみなしてその値を使い、
-// 届いていなければ素のマウス操作とみなしてevent->points()の値(通常1.0)を使う。

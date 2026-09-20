@@ -7,17 +7,7 @@
 #include <utility>
 #include <vector>
 
-// ---------------------------------------------------------------------------
 // CanvasActionController
-// ---------------------------------------------------------------------------
-// CanvasWidget が1つ保持する、全 CanvasAction の所有者兼ディスパッチャ。
-// 以前 CanvasWidget に散らばっていた以下を1箇所に集約する:
-//   - 相互排他: 新しいアクションを start する前に、今アクティブなアクションを cancel する
-//     (各 startXxxAction 冒頭の巨大な cancel リストを置き換える)。
-//   - 描画 uniform / オーバーレイ / パネル位置 / マウス横取り / 入力ブロック判定を、
-//     「現在アクティブなアクション」へ委譲する。
-// アクションは add<T>() で生成・所有され、host と自分自身(ctrl)が注入される。
-// ---------------------------------------------------------------------------
 
 class QOpenGLContext;
 class QOpenGLShaderProgram;
@@ -31,8 +21,7 @@ class CanvasActionController
 public:
     void setHost(CanvasActionHost &host) { host_ = &host; }
 
-    // アクションを生成して所有する。host と *this を注入したうえで T を構築する。
-    // 追加の構築引数(Pro/Free 差分など)は Args... で渡せる。
+    // アクションを生成して所有する。
     template <class T, class... Args>
     T *add(Args &&...args)
     {
@@ -71,8 +60,7 @@ public:
     bool routeMouseRelease    (QMouseEvent *e, ToolContext &ctx);
     bool routeMouseDoubleClick(QMouseEvent *e, ToolContext &ctx);
 
-    // キーボードショートカット(Shift+WASD)による平行移動。アクティブなアクションが
-    // 実際に処理したら true(CanvasWidget側はこの場合 nudgeActiveLayer 等へフォールバックしない)。
+    // キーボードショートカット(Shift+WASD)による平行移動。
     bool nudgeActive(const QVector2D &delta);
 
 private:

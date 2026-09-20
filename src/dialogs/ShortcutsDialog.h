@@ -16,9 +16,9 @@ class ShortcutRegistry;
 class ToolConfig;
 
 // ===========================================================================
-// ShortcutsDlg  ―  ショートカットキー設定ダイアログ
+// ShortcutsDialog  ―  ショートカットキー設定ダイアログ
 //
-// 画面構成は環境設定(SettingsDlg)に合わせてある: 左にカテゴリ一覧、右にその
+// 画面構成は環境設定(SettingsDialog)に合わせてある: 左にカテゴリ一覧、右にその
 // カテゴリの項目。カテゴリは ShortcutRegistry に登録された category から
 // 自動生成されるので、新しいショートカットが増えても(新しいカテゴリを
 // 使い始めても)このダイアログ側は一切変更不要。
@@ -35,13 +35,13 @@ class ToolConfig;
 // 破棄するだけなので、registryには一切影響しない。
 // 重複チェックは m_rows 全体(=全カテゴリ+全プリセット)をまたいで行う。
 // ===========================================================================
-class ShortcutsDlg : public QDialog
+class ShortcutsDialog : public QDialog
 {
     Q_OBJECT
 public:
     // toolCfg はツールプリセットの行を作るために使う。nullptr を渡した場合は
     // プリセットの行を出さない(ツール設定がまだ無い状況でも開けるように)。
-    explicit ShortcutsDlg(ShortcutRegistry &registry, ToolConfig *toolCfg,
+    explicit ShortcutsDialog(ShortcutRegistry &registry, ToolConfig *toolCfg,
                           QWidget *parent = nullptr);
 
 protected:

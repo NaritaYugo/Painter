@@ -3,7 +3,7 @@
 #include "docks/LayerDock.h"
 #include "docks/ColorCircleDock.h"
 #include "docks/ToolDock.h"
-#include "docks/ToolPropDock.h"
+#include "docks/ToolPropertyDock.h"
 #include "docks/ToolPresetDock.h"
 #include "docks/BrushSizeDock.h"
 #include "docks/NavigatorDock.h"
@@ -18,7 +18,7 @@
 #include "document/RecentFiles.h"
 #include "io/AbrCodec.h"
 #include "io/AbrPenMapping.h"
-#include "dialogs/CalibrationDlg.h"
+#include "dialogs/CalibrationDialog.h"
 
 #include <QScreen>
 #include <QShowEvent>
@@ -77,34 +77,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     #endif
 
     // タイトルバーを出さないためのウィンドウフラグ。
-    //
-    // Qt::WindowTitleHintを「付ける」こと。見た目のタイトルバーはWM_NCCALCSIZEで
-    // 非クライアント領域ごと潰すので出てこない。Claude・Discord・CLIP STUDIO PAINTなど
-    // 自前タイトルバーのアプリは、どれもこの形(スタイル上は普通の枠付きウィンドウの
-    // まま、描画領域だけ消す)になっている。
-    //
-    // 以前はTitleHintを外してWS_CAPTIONごと落としていたが、それが多くの不具合の
-    // 大元だった。TitleHintが無いとQtはWS_CAPTIONだけでなくWS_THICKFRAMEまで落とし
-    // (実測: 起動直後に STYLE: CAPTION|THICKFRAME|... -> POPUP|SYSMENU)、
-    // リサイズ枠を持たないウィンドウになる。すると最大化しても
-    // 「枠のぶん画面外へはみ出す」形にならず、ウィンドウ矩形がモニタ矩形と
-    // ぴったり一致してしまう。Windowsのシェルはこれを「最大化」ではなく
-    // 「全画面アプリ」とみなすため、
-    //   ・自動的に隠れるタスクバーが出てこない(SHQueryUserNotificationState=BUSY)
-    //   ・DWMがDirect Flipに切り替わり、メニュー等が重なるたび点滅・暗転する
-    //   ・GLの面のアルファがそのまま合成され、メニューバーが透ける
-    // が同時に起きていた。「一度ウィンドウを動かして最大化し直すと以後は直る」のは、
-    // そのときOSが枠込みで最大化ジオメトリを計算し直すため。
-    //
-    // WS_CAPTIONが残るとQtがフレーム余白を多めに見積もる件は、ネイティブウィンドウが
-    // 出来た直後にSWP_FRAMECHANGEDでフレームを取り直すことで解消している
-    // (MainWindowNative.cpp の refreshNativeFrame() 参照。実測でクライアント原点が
-    //  (1,38) から (0,0) になることを確認済み)。
-    //
-    // Qt::FramelessWindowHintは使わない ― あれもWS_THICKFRAME等ごと落としてしまい、
-    // 上と同じ状態になる。最小化/最大化ボタンのヒントは、見た目のボタンではなく
-    // WS_MINIMIZEBOX/WS_MAXIMIZEBOXを残すために付けている(これが無いと画面端への
-    // スナップやWin+矢印が効かない)。
     setWindowFlags(Qt::Window | Qt::CustomizeWindowHint | Qt::WindowTitleHint
                     | Qt::WindowSystemMenuHint
                     | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint);
@@ -119,55 +91,29 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     toolCfg = new ToolConfig();
 
     // カラーサークルの色相ツイストは環境設定由来のアプリ全体共通値。
-    // createWidgets()でColorWheelWidgetが作られる前に反映しておくと、最初から
-    // 正しいツイスト量でスクエア画像が構築される(後で入れると作り直し+
-    // 復元した現在色の上書きが発生してしまう)。
-    ColorWheelWidget::setHueTwist((float)SettingsDlg::loadValues().hueTwist);
+    ColorWheelWidget::setHueTwist((float)SettingsDialog::loadValues().hueTwist);
 
-    // 全ツール共通の筆圧カーブも環境設定由来のアプリ全体共通値。ToolConfigが
-    // 持ち、CanvasWidget::mapPressure()がツールごとのカーブより先に適用する。
+    // 全ツール共通の筆圧カーブも環境設定由来のアプリ全体共通値。
     applyGlobalPressureCurve();
 
     createWidgets();
     setupActions();  // QAction生成・ショートカット登録(MainWindowShortcuts.cpp)
 
-    // toolDockはsetupActions()より前のcreateWidgets()内で生成される(=構築時点では
-    // shortcuts_にまだ何も登録されておらずキー表示が空になる)ため、ここで改めて
-    // ツールチップのキー表示を最新の状態に合わせておく。
+    // toolDockはsetupActions()より前のcreateWidgets()内で生成される(=構築時点ではshortcuts_にまだ何も登録されておらずキー表示が空になる)ため、
+    // ここで改めてツールチップのキー表示を最新の状態に合わせておく。
     toolDock->refreshTooltips();
 
     connectSignals();
     createMenus();
     setupCaptionButtons(); // createMenus()でメニューバーが出来た後に置く
 
-    // 中央には常にタブが1枚以上ある。起動直後はスタートページのタブ1枚から始める
-    // (updateTabRelatedActionsEnabled()が触るQAction群を使うため、setupActions()より後)。
+    // 中央には常にタブが1枚以上ある。
     addNewTab();
-
-    // 【試して駄目だったこと】最初のキャンバスが出来た直後にウィンドウが
-    // 作り直される(WM_WINDOWPOSCHANGING flags=FRAMECHANGED|SHOWWINDOW → WM_NCCALCSIZE
-    // → WM_SIZE)のを避けようとして、ネイティブウィンドウ生成より前に描画に使わない
-    // QOpenGLWidgetを1枚置き、最初からOpenGLの面としてウィンドウを作らせる手を
-    // 試した。隠した場合も1x1で表示した場合も、作り直しは同じタイミング
-    // (GL初期化と初回paintGLの直後)に起きたので撤回。
-    // よく考えると createWidgets() の deckCanvasWidget_ が既に同じ条件を満たしており、
-    // 「QOpenGLWidgetがウィジェット木に居ること」では決まらないことが分かる
-    // (実際に描画されて初めて切り替わる)。同じ手を再発明しないこと。
-    //
-    // 作り直し自体はウィンドウ矩形もQt側のレイアウトも変えない(この環境の実測では
-    // win/menu/central/各ドックのサイズが前後で完全一致)。ただし環境によっては
-    // このときのドック再配分で幅が潰れるため、崩れたら戻す形で受け止める
-    // (MainWindow::restoreDockLayoutAfterFirstCanvas())。
 
     qApp->installEventFilter(this);
     installNativeWindowFilter(); // タイトルバー非表示まわりのWindows固有処理
-    // ここでrefreshNativeFrame()を予約しないこと。フィルタは表示前から効いており
-    // WM_NCCALCSIZEはウィンドウ生成の時点から正しく適用されるため、フレームの
-    // 再計算を改めて要求する意味が無い。むしろ起動時の余計なリサイズになる
-    // (作り直されたときはQEvent::WinIdChange側で貼り直している)。
-
     addDockWidget(Qt::LeftDockWidgetArea, navigatorDockWidget);
-    addDockWidget(Qt::LeftDockWidgetArea, toolPropDockWidget);
+    addDockWidget(Qt::LeftDockWidgetArea, toolPropertyDockWidget);
     addDockWidget(Qt::LeftDockWidgetArea, toolPresetDockWidget);
     addDockWidget(Qt::LeftDockWidgetArea, brushSizeDockWidget);
     addDockWidget(Qt::LeftDockWidgetArea, toolDockWidget);
@@ -177,12 +123,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     setDockNestingEnabled(true);
 
     // 標準セパレータは0pxにし、見た目を持たない広めのヒット領域だけを境界へ重ねる。
-    // Controller自身がMainWindowの子になるため、ここで所有ポインタを保持する必要はない。
     new DockResizeController(*this);
 
-    // ドックを重ねてタブ化した際にQtが遅延生成する切り替え用QTabBarを捕まえて
-    // DockTitleBar風の見た目(閉じるボタン付き)に揃え直す。生成タイミングを
-    // 捉えるクリーンなフックが無いため、軽い定期ポーリングで済ませる。
+    // ドックを重ねてタブ化した際にQtが遅延生成する切り替え用QTabBarを捕まえてDockTitleBar風の見た目(閉じるボタン付き)に揃え直す。
     auto *dockTabBarTimer = new QTimer(this);
     connect(dockTabBarTimer, &QTimer::timeout, this, [this] {
         styleNewDockTabBars();
@@ -194,22 +137,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     if (settings.contains("window/state")) {
         loadSettings();
     } else {
-        // resetDockLayout()(手動の「ドック配置をリセット」と共通)はrestoreState()を
-        // 使っており、その復元結果はウィンドウの実サイズに依存する。手動実行時は
-        // ウィンドウがすでに表示・最大化済みの状態で呼ばれるのに対し、コンストラクタ
-        // 内でこのまま同期的に呼ぶとウィンドウがまだ一度も表示されておらず実サイズが
-        // 確定していないため、同じrestoreState()の結果が変わってしまう(一部のドックが
-        // 正しく配置されない)。main()のw.show()が実行され、イベントループが回り始めて
-        // ウィンドウが実際に表示された直後に呼ばれるよう遅延させることで、手動実行時と
-        // 同じ条件(表示済みウィンドウに対して呼ぶ)に揃える。
+        // resetDockLayout()(手動の「ドック配置をリセット」と共通)はrestoreState()を使っており、その復元結果はウィンドウの実サイズに依存する。
         QTimer::singleShot(0, this, &MainWindow::resetDockLayout); // 初回起動時は初期レイアウトを適用
     }
 
-    // loadSettings()は保存済みの色(tool/color/rawRGBA)がある場合のみ
-    // colorCircleDockへ反映するため、初回起動時(保存設定が無い場合)は
-    // toolCfgの初期色(黒)がカラーサークルのUIへ一度も反映されないまま
-    // (ColorWheelWidget自身のコンストラクタ既定値である中間グレー位置の
-    // まま)になってしまう。ここで無条件に同期しておく。
+    // loadSettings()は保存済みの色(tool/color/rawRGBA)がある場合のみcolorCircleDockへ反映するため、
+    // 初回起動時(保存設定が無い場合)はtoolCfgの初期色(黒)がカラーサークルのUIへ一度も反映されないまま(ColorWheelWidget自身のコンストラクタ既定値である中間グレー位置のまま)になってしまう。
     colorCircleDock->setColor(toolCfg->color().rawRGBA());
 
     autoSaveTimer_ = new QTimer(this);
@@ -259,8 +192,7 @@ void MainWindow::createMenus() {
     editMenu->addAction(flipCanvasHorizontalAction);
     editMenu->addAction(flipCanvasVerticalAction);
 
-    // 変形の確定(Enter)はメニューには出さない一時的なアクションなので、
-    // メニューに積まずに直接ウィンドウへ関連付けてショートカットだけ有効にする。
+    // 変形の確定(Enter)はメニューには出さない一時的なアクションなので、メニューに積まずに直接ウィンドウへ関連付けてショートカットだけ有効にする。
     addAction(confirmTransformAction);
 
     QMenu *processMenu = menuBar()->addMenu("処理(&P)");
@@ -341,7 +273,7 @@ void MainWindow::createMenus() {
 
     QMenu *windowMenu = menuBar()->addMenu("ウィンドウ(&W)");
     windowMenu->addAction(toolDockWidget->toggleViewAction());
-    windowMenu->addAction(toolPropDockWidget->toggleViewAction());
+    windowMenu->addAction(toolPropertyDockWidget->toggleViewAction());
     windowMenu->addAction(toolPresetDockWidget->toggleViewAction());
     windowMenu->addAction(colorCircleDockWidget->toggleViewAction());
     windowMenu->addAction(layerDockWidget->toggleViewAction());
@@ -385,9 +317,6 @@ void MainWindow::createMenus() {
 
 void MainWindow::createWidgets() {
     // centralStackはペインツリー(paneTreeRoot_)を丸ごと差し替えるためだけの入れ物。
-    // 分割/畳みでルートがCanvasPaneとQSplitterの間を行き来するので、QMainWindowの
-    // centralWidgetを直接付け替える(=古い方が破棄される)のを避けている。
-    // スタートページはもう独立したページではなく、各タブ(CanvasTabPage)の中にある。
     centralStack = new QStackedWidget(this);
     centralStack->setObjectName(QStringLiteral("canvasWorkspace"));
     centralStack->setFrameShape(QFrame::NoFrame);
@@ -395,9 +324,8 @@ void MainWindow::createWidgets() {
     setCentralWidget(centralStack);
     // 最初のペインとタブはコンストラクタ側(setupActions()の後)で作る。
 
-    // Dock類のコンストラクタはCanvasWidget*を要求するため、タブが1枚も無い間のダミーとして
-    // 使う非表示CanvasWidgetを1つ用意する(どのペインのタブにも追加せず、表示もしないため
-    // initializeGL()は走らず、GLリソースのコストは掛からない)。
+    // Dock類のコンストラクタはCanvasWidget*を要求するため、タブが1枚も無い間のダミーとして使う非表示CanvasWidgetを1つ用意する(どのペインのタブにも追加せず、表示もしないためinitializeGL()は走らず、
+    // GLリソースのコストは掛からない)。
     deckCanvasWidget_ = new CanvasWidget(toolCfg, this);
     deckCanvasWidget_->hide(); // 表示しない(initializeGL()を走らせないため。Dock構築用のダミー)
 
@@ -408,12 +336,13 @@ void MainWindow::createWidgets() {
     toolDockWidget->setTitleBarWidget(new DockTitleBar("ツール", toolDockWidget));
     toolDockWidget->setWidget(toolDock);
 
-    toolPropDock       = new ToolPropDock(deckCanvasWidget_, toolCfg, this);
-    toolPropDockWidget = new QDockWidget("ツール設定", this);
-    toolPropDockWidget->setObjectName("toolPropDockWidget");
-    toolPropDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
-    toolPropDockWidget->setTitleBarWidget(new DockTitleBar("ツール設定", toolPropDockWidget));
-    toolPropDockWidget->setWidget(toolPropDock);
+    toolPropertyDock       = new ToolPropertyDock(deckCanvasWidget_, toolCfg, this);
+    toolPropertyDockWidget = new QDockWidget("ツール設定", this);
+    // QMainWindow::restoreState()が参照する永続ID。
+    toolPropertyDockWidget->setObjectName("toolPropDockWidget");
+    toolPropertyDockWidget->setAllowedAreas(Qt::AllDockWidgetAreas);
+    toolPropertyDockWidget->setTitleBarWidget(new DockTitleBar("ツール設定", toolPropertyDockWidget));
+    toolPropertyDockWidget->setWidget(toolPropertyDock);
 
     toolPresetDock       = new ToolPresetDock(deckCanvasWidget_, toolCfg, this);
     toolPresetDockWidget = new QDockWidget("ツールプリセット", this);
@@ -450,32 +379,25 @@ void MainWindow::createWidgets() {
     layerDockWidget->setTitleBarWidget(new DockTitleBar("レイヤー", layerDockWidget));
     layerDockWidget->setWidget(layerDock);
 
-    // 以前はここでtabWidgetのcurrentChanged/tabCloseRequestedを直接繋いでいたが、
-    // 分割表示対応でペインが複数になりうるため、ペインごとにcreatePane()内で
-    // CanvasPane::currentTabChanged/tabCloseRequestedへ接続するようになった。
+    // 以前はここでtabWidgetのcurrentChanged/tabCloseRequestedを直接繋いでいたが、分割表示対応でペインが複数になりうるため、
+    // ペインごとにcreatePane()内でCanvasPane::currentTabChanged/tabCloseRequestedへ接続するようになった。
 
-    // 初期状態(タブ0枚 → StartPage表示、キャンバス依存アクション無効化、Dock非表示)への
-    // 反映はここでは行わない。updateTabRelatedActionsEnabled()が触るQAction群は
-    // まだ生成されていない(setupActions()はcreateWidgets()の後に呼ばれる)ため、
-    // MainWindowコンストラクタ側でsetupActions()の後にupdateCentralPage()を呼ぶ。
+    // 初期状態(タブ0枚 → StartPage表示、キャンバス依存アクション無効化、Dock非表示)への反映はここでは行わない。
 }
 
-// glWidget(現在アクティブなタブ)に対する接続を張り直す。タブ作成直後・タブ切替の
-// どちらからも呼ばれる。呼び出し前に古い接続(glWidgetConnections_)を解除しておくこと。
+// glWidget(現在アクティブなタブ)に対する接続を張り直す。
 
 void MainWindow::connectSignals() {
-    // ---- Dock間の接続(いずれもglWidgetに依存しないので、タブ切替に関係なく
-    // アプリ生存中ずっと固定でよい。glWidget依存の接続はbindCanvasWidget()側にある) ----
+    // Dock間の接続
     connect(toolDock, &ToolDock::toolChanged, this, [this](ToolType curr) {
         toolCfg->color().setRawRGBA(colorCircleDock->color());
         toolCfg->color().setTransparent(colorCircleDock->isTransparent());
         brushSizeDock->syncSize(brushSizeFor(toolCfg, curr));
-        toolPropDock->setCurrentTool(curr);
+        toolPropertyDock->setCurrentTool(curr);
     });
-    connect(toolPropDock, &ToolPropDock::sizeChanged, this, [this]() {
-        // タブが1枚も無い間はglWidgetがnullptrになるため、その間はダミーの
-        // deckCanvasWidget_を使う(ToolDockのアクティブツールもタブ0枚の間は
-        // deckCanvasWidget_側に反映されているので、これで正しい値が取れる)。
+    connect(toolPropertyDock, &ToolPropertyDock::sizeChanged, this, [this]() {
+        // タブが1枚も無い間はglWidgetがnullptrになるため、その間はダミーのdeckCanvasWidget_を使う(ToolDockのアクティブツールもタブ0枚の間はdeckCanvasWidget_側に反映されているので、
+        // これで正しい値が取れる)。
         CanvasWidget *gl = glWidget ? glWidget : deckCanvasWidget_;
         ToolType curr = gl->getActiveTool();
         brushSizeDock->syncSize(brushSizeFor(toolCfg, curr));
@@ -485,24 +407,17 @@ void MainWindow::connectSignals() {
         CanvasWidget *gl = glWidget ? glWidget : deckCanvasWidget_;
         ToolType curr = gl->getActiveTool();
         setBrushSizeFor(toolCfg, curr, px);
-        toolPropDock->syncSize(px);
+        toolPropertyDock->syncSize(px);
         gl->updateCursor();
     });
     connect(colorCircleDock, &ColorCircleDock::colorChanged, this, [this](const QColor &c) {
         toolCfg->color().setRawRGBA(c);
     });
-    // 「透明色」のオン/オフ。色そのもの(アルファ=消す強さを含む)はcolorChanged側で
-    // 通知され続けるので、ここではフラグだけを移す。
+    // 「透明色」のオン/オフ。
     connect(colorCircleDock, &ColorCircleDock::transparentChanged, this, [this](bool on) {
         toolCfg->color().setTransparent(on);
         if (glWidget) glWidget->update(); // ライブプレビューの色が変わるので描き直す
     });
 }
 
-// ===========================================================================
 // Photoshopのブラシファイル(.abr)
-// ---------------------------------------------------------------------------
-// 対応するのは両方に同じ意味がある項目だけ(AbrPenMapping参照)。移せなかった
-// ものは黙って落とさず、実行後にまとめて提示する。
-// ===========================================================================
-

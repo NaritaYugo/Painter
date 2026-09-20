@@ -52,11 +52,7 @@
 
 void CanvasWidget::updateBelowCompositeCache(int uptoExclusiveIndex)
 {
-    // 既に有効なら作り直さない。無効化はレイヤー構成が変わったとき(doc_->onChanged)に
-    // だけ行われるので、valid==true は「現在のアクティブ構成に対して正しい」ことを意味する。
-    // これにより同じレイヤーへ連続で線を引くとき、全画面の事前合成を毎回やり直さずに済む。
-    // ただしキャッシュの中身は uptoExclusiveIndex に依存するので、先読み作成
-    // (prewarmCompositeCaches)時と違うレイヤーへ描き始めた場合は作り直す。
+    // 既に有効なら作り直さない。
     if (belowCompositeCacheValid_ && belowCompositeCacheUpto_ == uptoExclusiveIndex) return;
 
     if (!doc_ || doc_->layerCount() == 0 || !computeBelowCompositeProgram) {
@@ -71,7 +67,6 @@ void CanvasWidget::updateBelowCompositeCache(int uptoExclusiveIndex)
     glBindImageTexture(0, belowCompositeTex,         0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
     glBindImageTexture(1, belowCompositeClipBaseTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
     // 初期値とライブプレビューはこの用途では使わない(uUseInit=0 / uPaintPreview=0)。
-    // ただしシェーダーが宣言しているイメージユニットは有効なテクスチャで埋めておく。
     glBindImageTexture(2, belowCompositeTex,         0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
     glBindImageTexture(3, belowCompositeClipBaseTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
     glBindImageTexture(4, maskTex,          0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
@@ -87,15 +82,8 @@ void CanvasWidget::updateBelowCompositeCache(int uptoExclusiveIndex)
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
     computeBelowCompositeProgram->release();
 
-    // イメージユニット0は、このコードベースの他の場所(stroke.comp/maskclear.comp)
-    // では「呼び出し側が直前に明示的にbindし直さなくても、常にmaskTexが
-    // バインドされている」という前提で使われている(それぞれの呼び出し末尾で
-    // maskTexへ戻す形で維持されている暗黙の不変条件)。ここで一時的にimageユニット0を
-    // belowCompositeTexへ差し替えたままにしておくと、この直後にPenEraserTool::
-    // onMousePress()が行う「前回ストロークの範囲だけマスクをクリアする」処理
-    // (item3)がmaskTexではなくbelowCompositeTexの方を書き換えてしまい、
-    // そのクリア範囲(=直前のストロークの矩形)がキャッシュ上で透明の穴として
-    // 抜けて見える不具合の原因になっていた。呼び出し前の状態へ戻す。
+    // イメージユニット0は、このコードベースの他の場所(stroke.comp/maskclear.comp)では「呼び出し側が直前に明示的にbindし直さなくても、
+    // 常にmaskTexがバインドされている」という前提で使われている(それぞれの呼び出し末尾でmaskTexへ戻す形で維持されている暗黙の不変条件)。
     glBindImageTexture(0, maskTex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R8);
 
     belowCompositeCacheValid_ = true;
@@ -115,15 +103,12 @@ void CanvasWidget::prewarmCompositeCaches()
     if (!glReady_ || !doc_ || doc_->layerCount() == 0) return;
     if (compositeCachePrewarmDone_) return;
 
-    // ストローク中(またはドラッグ操作中)はGPUを取り合わないよう見送り、
-    // 終わってからやり直す。ストローク開始時に必要ならその場で作られるので、
-    // 見送っても正しさには影響しない。
+    // ストローク中(またはドラッグ操作中)はGPUを取り合わないよう見送り、終わってからやり直す。
     if (Tool *t = currentTool(); t && t->isActive()) {
         if (compositeCachePrewarmTimer_) compositeCachePrewarmTimer_->start();
         return;
     }
-    // 非表示のタブ(別ペインへ切り替え済み等)では作らない。表示に戻ったときに
-    // またレイヤー通知が来るか、最悪ストローク開始時に作られる。
+    // 非表示のタブ(別ペインへ切り替え済み等)では作らない。
     if (!isVisible()) return;
 
     compositeCachePrewarmDone_ = true;
@@ -134,9 +119,7 @@ void CanvasWidget::prewarmCompositeCaches()
     clock.start();
     updateBelowCompositeCache(active);
     updateAboveCompositeCache(active);
-    // ここまでで発行したディスパッチはGPUキューに積まれただけで、実処理は
-    // 「次にpresentするフレーム」が待つことになる。その次のフレームがストロークの
-    // 1枚目にならないよう、ここで通常の再描画を1回入れてアイドル中に消化させる。
+    // ここまでで発行したディスパッチはGPUキューに積まれただけで、実処理は「次にpresentするフレーム」が待つことになる。
     update();
     WINLOG(QStringLiteral("PERF prewarm: composite caches submitted in %1ms (below=%2 above=%3)")
                .arg(clock.nsecsElapsed() / 1e6, 0, 'f', 2)
@@ -155,25 +138,16 @@ void CanvasWidget::updateAboveCompositeCache(int activeIndex)
     const int n = doc_->layerCount();
     if (activeIndex < 0 || activeIndex >= n - 1) return; // 上にレイヤーが無ければ作る意味なし
 
-    // フォルダーのマスクを編集中は事前合成しない。フォルダーの子は layers 上で
-    // フォルダー自身の直後(=「上」)に並ぶため、このキャッシュを作ると子が丸ごと
-    // 1枚のテクスチャに焼かれてしまい、render.fragのマスク編集ライブプレビュー
-    // (previewMaskAlphaOf。祖先マスク経由で子へ効く)がストローク中に反映されなくなる。
+    // フォルダーのマスクを編集中は事前合成しない。
     if (doc_->layers[activeIndex].layerType == LayerType::Folder
         && editingMaskLayerIndex_ == activeIndex)
         return;
 
-    // 有効化条件: アクティブより上のレイヤーが全て「通常ブレンド・非クリッピング・
-    // 非調整レイヤー」であること。この条件下なら上のスタックは互いに source-over
-    // (通常合成)だけで積み上がり、結合的なので1枚へ事前合成→最後に1回重ねる、で
-    // 通常経路と同一の結果になる。1つでも非通常ブレンド/クリッピング/調整レイヤーが
-    // あると事前合成が下の合成結果に依存してしまい正しくないため、諦めて従来通り
-    // 毎フレーム個別合成へフォールバックする。
+    // 有効化条件: アクティブより上のレイヤーが全て「通常ブレンド・非クリッピング・非調整レイヤー」であること。
     for (int z = activeIndex + 1; z < n; z++) {
         const Layer &ly = doc_->layers[z];
         if (ly.layerType == LayerType::Adjustment) return;
-        // フィルターレイヤーも同じ理由で事前合成できない(効果が下の合成結果に
-        // 依存するうえ、近傍参照なので1枚に畳んでから重ねることができない)。
+        // フィルターレイヤーも同じ理由で事前合成できない(効果が下の合成結果に依存するうえ、近傍参照なので1枚に畳んでから重ねることができない)。
         if (ly.layerType == LayerType::Filter) return;
         if (ly.blendMode != BlendMode::Normal) return;
         if (ly.clipping) return;
@@ -206,13 +180,9 @@ void CanvasWidget::updateAboveCompositeCache(int activeIndex)
     aboveCompositeCacheValid_ = true;
 }
 
-// ===========================================================================
-// フィルターレイヤーの連鎖 (CanvasWidget.h の filterChainResult_ のコメント参照)
-// ===========================================================================
+// フィルターレイヤーの連鎖 (CanvasWidget.h の filterChainResult_ のコメント参照)。
 
 // このレイヤーが「実際に表示へ効いているフィルターレイヤー」か。
-// 非表示・不透明度0・非表示フォルダーの中にあるものは効いていない扱いにして、
-// 連鎖から外す(=オフスクリーンの合成そのものを省ける)。
 static bool filterLayerIsActive(const CanvasDocument &doc, int z,
                                 const QVector<QVector<int>> &ancestorsPerLayer)
 {
@@ -230,8 +200,7 @@ static bool filterLayerIsActive(const CanvasDocument &doc, int z,
 int CanvasWidget::topmostActiveFilterLayer() const
 {
     if (!doc_ || doc_->layerCount() == 0) return -1;
-    // フィルターレイヤーが1枚も無い文書(大多数)では、ここで即座に抜けて
-    // computeAncestorFolders()のツリー走査すら行わない。
+    // フィルターレイヤーが1枚も無い文書(大多数)では、ここで即座に抜けてcomputeAncestorFolders()のツリー走査すら行わない。
     bool any = false;
     for (const Layer &ly : doc_->layers)
         if (ly.layerType == LayerType::Filter) { any = true; break; }
@@ -249,11 +218,7 @@ bool CanvasWidget::ensureFilterChainTextures()
     if (canvasW <= 0 || canvasH <= 0) return false;
     if (filterChainResult_[0]) return true;
     for (int i = 0; i < 2; i++) {
-        // GL_LINEAR は必須。render.frag がこれを画面表示のために直接サンプリング
-        // するので、キャッシュを使わない経路が読むレイヤーのタイル配列
-        // (LayerSliceAllocator、GL_LINEAR)と揃っていないと、フィルターレイヤーの
-        // 有無だけで表示のアンチエイリアスが変わってしまう
-        // (belowCompositeTex等で実際に起きた不具合。initTextures()のコメント参照)。
+        // GL_LINEAR は必須。
         filterChainResult_[i] = makeTexture2D(GL_RGBA8, canvasW, canvasH, GL_LINEAR);
         filterChainClip_[i]   = makeTexture2D(GL_RGBA8, canvasW, canvasH, GL_LINEAR);
     }
@@ -284,9 +249,7 @@ void CanvasWidget::dispatchCompositeSegment(int targetStart, int targetEnd,
 
     glBindImageTexture(0, filterChainResult_[dstResultIdx], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
     glBindImageTexture(1, filterChainClip_[dstClipIdx],     0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-    // 初期値。使わない場合でも、シェーダーが宣言している以上イメージユニットには
-    // 有効なテクスチャを繋いでおく(読み書きが同じテクスチャにならないよう、
-    // 出力先ではない方のping-pong面を指す)。
+    // 初期値。
     const int inR = useInit ? initResultIdx : (dstResultIdx ^ 1);
     const int inC = useInit ? initClipIdx   : (dstClipIdx   ^ 1);
     glBindImageTexture(2, filterChainResult_[inR], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
@@ -301,9 +264,7 @@ void CanvasWidget::dispatchCompositeSegment(int targetStart, int targetEnd,
     prog->setUniformValue("uCanvasTilesX", doc_->tilesX());
     prog->setUniformValue("uUseInit",      useInit ? 1 : 0);
 
-    // ライブプレビュー(フィルターレイヤーより下に描いているときだけ)。値は
-    // paintGL が render.frag へ渡すものと同じでなければならない(食い違うと
-    // ストローク中とストローク後で線の見た目が変わる)。
+    // ライブプレビュー(フィルターレイヤーより下に描いているときだけ)。
     prog->setUniformValue("uPaintPreview", withPaintPreview ? 1 : 0);
     if (withPaintPreview) {
         // paintGL が render.frag へ渡すのと同じ考え方(あちらのコメント参照)。
@@ -342,9 +303,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
 {
     const Layer &ly = doc_->layers[z];
 
-    // フォルダーの不透明度・マスクをカスケードする(CanvasCompositor::updateLayerSSBOs
-    // と同じ考え方。フィルターレイヤーは合成ループを通らないのでここで自前に行う)。
-    // 両方の種類(色収差/ぼかし)で共通して使う。
+    // フォルダーの不透明度・マスクをカスケードする(CanvasCompositor::updateLayerSSBOsと同じ考え方。フィルターレイヤーは合成ループを通らないのでここで自前に行う)。
     const QVector<QVector<int>> ancestors = doc_->computeAncestorFolders();
     float effOpacity = ly.opacity;
     int   ancMask[4] = { -1, -1, -1, -1 };
@@ -358,8 +317,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
     }
     const int ownMask = (ly.hasMask && !ly.maskTiles.isEmpty()) ? ly.maskTiles[0][0] : -1;
 
-    // 「不透明度×レイヤーマスク」に関わるuniformは2シェーダーで名前も意味も同じ
-    // (chromaticAberrationLayer.comp / gaussianBlurLayer.comp 共通)なのでまとめる。
+    // 「不透明度×レイヤーマスク」に関わるuniformは2シェーダーで名前も意味も同じ(chromaticAberrationLayer.comp / gaussianBlurLayer.comp 共通)なのでまとめる。
     auto setMaskOpacityUniforms = [&](QOpenGLShaderProgram *prog) {
         prog->setUniformValue("uOpacity",    effOpacity);
         prog->setUniformValue("uTileSize",   TILE_SIZE);
@@ -396,9 +354,6 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         if (!prog) return false; // 通常は常に存在する(無料版でも使える機能のため)
 
         // 2次元ガウスは分離できるので「横1D→縦1D」の2パス
-        // (詳細は gaussianBlurLayer.comp のコメント参照)。中間バッファは
-        // 読み込み元(filterChainResult_[srcIdx])とも書き込み先
-        // (filterChainResult_[srcIdx^1])とも別の1枚が要る。
         const float sigma = qMax(0.5f, ly.filter.blurRadiusPx / 2.0f);
         const int   radius = qMax(1, (int)qRound(ly.filter.blurRadiusPx));
         const GLuint gx = (canvasW + 15) / 16, gy = (canvasH + 15) / 16;
@@ -411,7 +366,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         prog->setUniformValue("uWrapY", doc_->wrapY() ? 1 : 0);
         setMaskOpacityUniforms(prog);
 
-        // 1パス目: 横ぼかしを中間バッファへ
+        // 1パス目: 横ぼかしを中間バッファへ。
         glBindImageTexture(0, filterChainResult_[srcIdx], 0, GL_FALSE, 0, GL_READ_ONLY,  GL_RGBA8);
         glBindImageTexture(1, filterChainBlurScratch_,     0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
         glBindImageTexture(2, filterChainResult_[srcIdx],  0, GL_FALSE, 0, GL_READ_ONLY,  GL_RGBA8); // uOrig(1パス目では未使用)
@@ -423,7 +378,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         glDispatchCompute(gx, gy, 1);
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-        // 2パス目: 縦ぼかし + 不透明度・マスクでのブレンドを仕上げる
+        // 2パス目: 縦ぼかし + 不透明度・マスクでのブレンドを仕上げる。
         glBindImageTexture(0, filterChainBlurScratch_,         0, GL_FALSE, 0, GL_READ_ONLY,  GL_RGBA8);
         glBindImageTexture(1, filterChainResult_[srcIdx ^ 1],  0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
         glBindImageTexture(2, filterChainResult_[srcIdx],      0, GL_FALSE, 0, GL_READ_ONLY,  GL_RGBA8); // uOrig
@@ -443,8 +398,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         auto *prog = computeMotionBlurLayerProgram;
         if (!prog) return false; // 通常は常に存在する(無料版でも使える機能のため)
 
-        // 経路長に見合ったサンプル数(MotionBlurTool::sampleCountと同じ考え方だが、
-        // 特定のレイヤーに紐付かないのでキャンバスサイズを基準にする)。
+        // 経路長に見合ったサンプル数(MotionBlurTool::sampleCountと同じ考え方だが、特定のレイヤーに紐付かないのでキャンバスサイズを基準にする)。
         float pathPx;
         if (ly.filter.mbMode == 0) {
             pathPx = ly.filter.mbDistancePx;
@@ -496,8 +450,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         prog->setUniformValue("uBladeRotRad",    (float)qDegreesToRadians(ly.filter.lbBladeRotDeg));
         prog->setUniformValue("uBokehGamma",     bokehGamma);
         prog->setUniformValue("uThreshold",      ly.filter.lbThreshold);
-        // シェーダー側の重みは 1 + boost * smoothstep(...) なので、LensBlurToolと
-        // 同じくスライダー1.0でハイライトが周囲の数倍の重みになるようスケールする。
+        // シェーダー側の重みは 1 + boost * smoothstep(...) なので、LensBlurToolと同じくスライダー1.0でハイライトが周囲の数倍の重みになるようスケールする。
         prog->setUniformValue("uHighlightBoost", ly.filter.lbHighlightBoost * 8.0f);
         setMaskOpacityUniforms(prog);
 
@@ -516,8 +469,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         const int gridX = (canvasW + blockSize - 1) / blockSize;
         const int gridY = (canvasH + blockSize - 1) / blockSize;
 
-        // 1パス目: ブロック平均を filterChainBlurScratch_(ガウスぼかしレイヤーと
-        // 共用の中間バッファ)の左上へ集約する(詳細は mosaicReduceLayer.comp 参照)。
+        // 1パス目: ブロック平均を filterChainBlurScratch_(ガウスぼかしレイヤーと共用の中間バッファ)の左上へ集約する(詳細は mosaicReduceLayer.comp 参照)。
         reduceProg->bind();
         glBindImageTexture(0, filterChainResult_[srcIdx], 0, GL_FALSE, 0, GL_READ_ONLY,  GL_RGBA8);
         glBindImageTexture(1, filterChainBlurScratch_,     0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
@@ -526,7 +478,7 @@ bool CanvasWidget::applyFilterLayer(int z, int srcIdx)
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
         reduceProg->release();
 
-        // 2パス目: ブロック平均を引いて不透明度・マスクでブレンドする
+        // 2パス目: ブロック平均を引いて不透明度・マスクでブレンドする。
         prog->bind();
         bindLayerBanksForSampling(prog);
         glBindImageTexture(0, filterChainResult_[srcIdx],     0, GL_FALSE, 0, GL_READ_ONLY,  GL_RGBA8);
@@ -582,7 +534,7 @@ void CanvasWidget::rebuildFilterChain(int startZ, bool withPaintPreview)
     bool haveInit = false;    // ri/ci が有効か(=1区間でも合成済みか)
     int  segStart = 0;
 
-    // [segStart, segEnd] を合成して ri/ci を進める
+    // [segStart, segEnd] を合成して ri/ci を進める。
     auto composeUpTo = [&](int segEnd) {
         if (segEnd < segStart) return;
         const int dr = haveInit ? (ri ^ 1) : 0;
@@ -596,8 +548,7 @@ void CanvasWidget::rebuildFilterChain(int startZ, bool withPaintPreview)
 
         composeUpTo(z - 1);
         if (!haveInit) {
-            // 一番下がフィルターレイヤーで、その下に何も無い場合。合成結果は空なので
-            // 空の区間を1回合成して(=透明で埋めて)から進める。
+            // 一番下がフィルターレイヤーで、その下に何も無い場合。
             dispatchCompositeSegment(0, -1, false, 0, 0, 0, 0, withPaintPreview);
             ri = 0; ci = 0; haveInit = true;
         }
@@ -605,13 +556,11 @@ void CanvasWidget::rebuildFilterChain(int startZ, bool withPaintPreview)
         segStart = z + 1;
     }
 
-    // 一番上のフィルターレイヤーより上に残っている区間(表示用途では空、
-    // 書き出し用途では最上位レイヤーまで)。
+    // 一番上のフィルターレイヤーより上に残っている区間(表示用途では空、書き出し用途では最上位レイヤーまで)。
     composeUpTo(qMin(startZ, doc_->layerCount()) - 1);
 
     if (!haveInit) {
         // フィルターレイヤーが1枚も効いていない、かつ合成すべき区間も無い
-        // (startZ==0)。呼び出し側が事前合成なしとして扱えるようvalidにしない。
         return;
     }
 
@@ -631,16 +580,13 @@ int CanvasWidget::prepareCompositeBase(GLuint &outResult, GLuint &outClip)
 
     const int topFilter = topmostActiveFilterLayer();
     if (topFilter < 0) {
-        // フィルターレイヤーが無い(大多数の文書)。従来通り、ストローク中の
-        // 下キャッシュだけを使う。
+        // フィルターレイヤーが無い(大多数の文書)。
         return belowCompositeCacheValid_ ? doc_->activeLayerIndex() : -1;
     }
 
-    // フィルターレイヤーがある間は、ストローク用の下キャッシュ(フィルターの効果を
-    // 含まない)は使えないので、必ず連鎖の結果から始める。
+    // フィルターレイヤーがある間は、ストローク用の下キャッシュ(フィルターの効果を含まない)は使えないので、必ず連鎖の結果から始める。
     const int startZ = topFilter + 1;
-    // アクティブレイヤーがフィルターより下にある間は、ストロークの線そのものが
-    // 連鎖の入力になるので毎フレーム作り直す必要がある。
+    // アクティブレイヤーがフィルターより下にある間は、ストロークの線そのものが連鎖の入力になるので毎フレーム作り直す必要がある。
     const bool strokingBelowFilter =
         (currentTool() && currentTool()->isActive() && doc_->activeLayerIndex() <= topFilter);
 
@@ -654,15 +600,11 @@ int CanvasWidget::prepareCompositeBase(GLuint &outResult, GLuint &outClip)
 }
 
 
-// ===========================================================================
-// 書き出し
-// ===========================================================================
+// 書き出し。
 QImage CanvasWidget::exportCanvas()
 {
     makeCurrent();
-    // フィルターレイヤーを含む文書は、タイル単位の composite.comp では正しく
-    // 書き出せない(近傍参照なのでタイルの外が見えない)。キャンバス全面を扱う
-    // 連鎖(rebuildFilterChain)を最上位レイヤーまで通した結果を読み戻す。
+    // フィルターレイヤーを含む文書は、タイル単位の composite.comp では正しく書き出せない(近傍参照なのでタイルの外が見えない)。
     if (topmostActiveFilterLayer() >= 0) {
         QImage img = renderExportViaFilterChain();
         if (!img.isNull()) return img;
@@ -673,16 +615,12 @@ QImage CanvasWidget::exportCanvas()
 }
 
 // 全レイヤー(フィルター適用済み)をキャンバス全面で合成して読み戻す。
-// 読み戻しの手順と最後の上下反転は CanvasCompositor::renderExport と同じ
-// (連鎖の出力テクスチャは、あちらが組み立てる exportTex と同じ向き ―― タイル
-//  (tx,ty)がピクセル(tx*TILE_SIZE, ty*TILE_SIZE)に対応する ―― になっている)。
 QImage CanvasWidget::renderExportViaFilterChain()
 {
     if (!doc_ || doc_->layerCount() == 0) return QImage();
 
     rebuildFilterChain(doc_->layerCount(), /*withPaintPreview=*/false);
-    // 表示用のキャッシュとしては「最上位まで合成済み」は使えないので、
-    // 次の paintGL で表示用に組み直させる。
+    // 表示用のキャッシュとしては「最上位まで合成済み」は使えないので、次の paintGL で表示用に組み直させる。
     const bool ok = filterChainValid_;
     const GLuint outTex = filterChainOutResult_;
     invalidateFilterChain();
@@ -708,18 +646,15 @@ QImage CanvasWidget::renderExportViaFilterChain()
 
 bool CanvasWidget::exportToImage(const QString &filePath)
 {
-    // 既存の関数を呼び出して合成済みの QImage を取得
+    // 既存の関数を呼び出して合成済みの QImage を取得。
     QImage img = exportCanvas();
 
     if (img.isNull()) {
         return false; // 画像の取得に失敗した場合
     }
 
-    // 指定されたパスに画像を保存 (フォーマットは拡張子から Qt が自動判定してくれます)
-    // 最高の品質(100)で保存する場合は第3引数に100を指定できます
+    // 指定されたパスに画像を保存 (フォーマットは拡張子から Qt が自動判定してくれます)。
     return img.save(filePath, nullptr, 100);
 }
 
-// ===========================================================================
-// 保存
-// ===========================================================================
+// 保存。

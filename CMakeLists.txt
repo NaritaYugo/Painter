@@ -72,13 +72,22 @@ src/main.cpp
 
     src/docks/LayerDock.h
     src/docks/LayerDock.cpp
-    src/docks/layers/LayerDockWidgets.h
+    src/docks/layers/LayerDockLayout.h
+    src/docks/layers/LayerDockLayout.cpp
+    src/docks/layers/LayerIndicatorZone.h
+    src/docks/layers/LayerIndicatorZone.cpp
+    src/docks/layers/LayerPickerPopup.h
+    src/docks/layers/LayerPickerPopup.cpp
+    src/docks/layers/LayerRowWidget.h
+    src/docks/layers/LayerRowWidget.cpp
+    src/docks/layers/MaskOpacityPreview.h
+    src/docks/layers/MaskOpacityPreview.cpp
     src/docks/ColorCircleDock.h
     src/docks/ColorCircleDock.cpp
     src/docks/ToolDock.h
     src/docks/ToolDock.cpp
-    src/docks/ToolPropDock.h
-    src/docks/ToolPropDock.cpp
+    src/docks/ToolPropertyDock.h
+    src/docks/ToolPropertyDock.cpp
     src/docks/ToolPresetDock.h
     src/docks/ToolPresetDock.cpp
     src/docks/BrushSizeDock.h
@@ -86,14 +95,14 @@ src/main.cpp
     src/docks/NavigatorDock.h
     src/docks/NavigatorDock.cpp
 
-    src/dialogs/SettingsDlg.h
-    src/dialogs/SettingsDlg.cpp
-    src/dialogs/CalibrationDlg.h
-    src/dialogs/CalibrationDlg.cpp
-    src/dialogs/ShortcutsDlg.h
-    src/dialogs/ShortcutsDlg.cpp
-    src/dialogs/NewCanvasDlg.h
-    src/dialogs/NewCanvasDlg.cpp
+    src/dialogs/SettingsDialog.h
+    src/dialogs/SettingsDialog.cpp
+    src/dialogs/CalibrationDialog.h
+    src/dialogs/CalibrationDialog.cpp
+    src/dialogs/ShortcutsDialog.h
+    src/dialogs/ShortcutsDialog.cpp
+    src/dialogs/NewCanvasDialog.h
+    src/dialogs/NewCanvasDialog.cpp
     src/dialogs/HueSatLightPanel.h
     src/dialogs/HueSatLightPanel.cpp
     src/dialogs/BrightnessContrastPanel.h

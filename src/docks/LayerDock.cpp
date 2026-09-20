@@ -1,5 +1,8 @@
 #include "docks/LayerDock.h"
-#include "docks/layers/LayerDockWidgets.h"
+#include "docks/layers/LayerDockLayout.h"
+#include "docks/layers/LayerIndicatorZone.h"
+#include "docks/layers/LayerRowWidget.h"
+#include "docks/layers/MaskOpacityPreview.h"
 
 #include "canvas/CanvasWidget.h"
 #include "components/ThemeColors.h"
@@ -12,13 +15,12 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QTimer>
 #include <QVBoxLayout>
-// ===========================================================================
 // LayerDock
-// ===========================================================================
 LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
     : QWidget(parent), glWidget(gl)
 {
@@ -32,7 +34,7 @@ LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(6);
 
-    // ---- 上部コントロール(選択中レイヤーのブレンドモード/不透明度、追加/削除) ----
+    // ---- 上部コントロール(選択中レイヤーのブレンドモード/不透明度、追加/削除) ----。
     auto *ctrlRow = new QHBoxLayout();
     auto *ctrlLeft = new QVBoxLayout();
     blendCombo = new QComboBox(this);
@@ -44,15 +46,11 @@ LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
         int active = doc.activeLayerIndex();
         if (active < 0 || active >= doc.layerCount()) return;
         if (blendComboMode_ == BlendComboMode::Adjustment) {
-            // 調整レイヤー選択中は、このコンボは種類(色相・彩度・明度/明るさ・
-            // コントラスト)の切り替えとして働く
+            // 調整レイヤー選択中は、このコンボは種類。
             doc.layers[active].adjustment.kind = static_cast<AdjustmentKind>(data.toInt());
             refresh(); // メタ表示("色相・彩度・明度: 100%"等)を更新する
         } else if (blendComboMode_ == BlendComboMode::Filter) {
-            // フィルターレイヤー選択中は、このコンボは種類(ぼかし/色収差)の
-            // 切り替えとして働く。doc.onChangedを経由しない直接書き換えなので、
-            // オフスクリーンの連鎖キャッシュを明示的に無効化する(そうしないと
-            // 種類を変えても画面がストローク等の次の再合成まで古いままになる)。
+            // フィルターレイヤーでは種類を選択する。
             doc.layers[active].filter.kind = static_cast<FilterKind>(data.toInt());
             glWidget->invalidateFilterChainCache();
             glWidget->update();
@@ -88,8 +86,7 @@ LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
         }
         )");
 
-    // 親をthisにしておく(setMenu()はメニューの所有権を取らないため、
-    // 親無しで作るとLayerDock破棄後もQMenuが残る)。
+    // 親をthisにしておく(setMenu()はメニューの所有権を取らないため、親無しで作るとLayerDock破棄後もQMenuが残る)。
     QMenu *specialLayerMenu = new QMenu(this);
     addSpecialLayerBtn->setMenu(specialLayerMenu);
     QAction *addFolderAction = specialLayerMenu->addAction("新規フォルダー");
@@ -142,8 +139,7 @@ LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
         opacityLabel->setText(QString::number(qBound(0, qRound(v * 100.0f), 100)) + "%");
         doc.setLayerOpacity(a, v);
     });
-    // クリック: そのレイヤーのマスク編集モードをオン/オフ(CanvasWidget側で、まだ
-    // マスクが無ければ白マスクを自動生成する)。
+    // クリック: そのレイヤーのマスク編集モードをオン/オフ(CanvasWidget側で、まだマスクが無ければ白マスクを自動生成する)。
     connect(opacityPreview, &MaskOpacityPreview::clicked, this, [this]() {
         CanvasDocument &doc = glWidget->document();
         int a = doc.activeLayerIndex();
@@ -160,7 +156,7 @@ LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
 
     mainLayout->addLayout(ctrlRow);
 
-    // ---- パンくずリスト(フォルダーの階層を降りているときだけ表示) ----
+    // ---- パンくずリスト(フォルダーの階層を降りているときだけ表示) ----。
     breadcrumbBar_ = new QWidget(this);
     breadcrumbLayout_ = new QHBoxLayout(breadcrumbBar_);
     breadcrumbLayout_->setContentsMargins(2, 0, 2, 0);
@@ -168,7 +164,7 @@ LayerDock::LayerDock(CanvasWidget *gl, QWidget *parent)
     breadcrumbBar_->setVisible(false);
     mainLayout->addWidget(breadcrumbBar_);
 
-    // ---- レイヤーリスト + 常時表示インジケーター ----
+    // ---- レイヤーリスト + 常時表示インジケーター ----。
     auto *splitter = new QSplitter();
 
     scrollArea = new QScrollArea(this);
@@ -206,13 +202,7 @@ void LayerDock::setCanvasWidget(CanvasWidget *gl)
 {
     glWidget = gl;
     indicatorZone->setCanvasWidget(gl);
-    // LayerRowWidgetは(サムネイルキャッシュを保持するため)自分がどのCanvasWidget向けに
-    // 作られたかを覚えず、rebuildRows()の使い回しロジックもレイヤー構成の「形状」だけで
-    // 一致判定している。そのためタブ切替でglWidget(=対象ドキュメント)が変わった際、
-    // refresh()の「形状が同じなら中身だけ更新」高速パスに乗ってしまうと、古いタブに
-    // 紐づいたままの行ウィジェットが新しいタブのドキュメントに対して操作され続け、
-    // レイヤー数不一致によるインデックス範囲外クラッシュを招く。タブ切替時は必ず
-    // 全行を作り直すことでこれを防ぐ。
+    // LayerRowWidgetは(サムネイルキャッシュを保持するため)自分がどのCanvasWidget向けに作られたかを覚えず、rebuildRows()の使い回しロジックもレイヤー構成の「形状」だけで一致判定している。
     qDeleteAll(rows_);
     rows_.clear();
     folderPath_.clear();
@@ -230,16 +220,12 @@ void LayerDock::rebuildRows()
     int activeIndex = doc.activeLayerIndex();
     emptyFolderHintLabel_->setVisible(insideFolder() && rows.isEmpty());
 
-    // レイヤー構成(行数/各行の枚数)が変わるたびに全行を作り直すと、変化していない
-    // 既存レイヤーぶんまでサムネイルを再生成することになり重い。rowLayers の内容が
-    // 完全一致する既存ウィジェットがあればそのまま使い回す(サムネイルキャッシュごと
-    // 保持される)ことで、末尾へのレイヤー追加のような典型的な操作を新規1行ぶんの
-    // コストだけで済ませる。
+    // レイヤー構成(行数/各行の枚数)が変わるたびに全行を作り直すと、変化していない既存レイヤーぶんまでサムネイルを再生成することになり重い。
     QVector<LayerRowWidget*> oldRows = rows_;
     QVector<bool> reused(oldRows.size(), false);
     rows_.clear();
 
-    // rows は下から上の順で保持している。UI上は上(最前面)を一番上に表示する。
+    // rows は下から上の順で保持している。
     for (int r = rows.size() - 1; r >= 0; --r) {
         LayerRowWidget *row = nullptr;
         for (int i = 0; i < oldRows.size(); i++) {
@@ -286,12 +272,7 @@ void LayerDock::selectLayer(int layerIndex)
 void LayerDock::updateControlsFromActiveLayer()
 {
     const CanvasDocument &doc = glWidget->document();
-    // キャンバスタブが1つも開いていないとき(glWidgetがMainWindowのダミーCanvasWidgetを
-    // 指している)はlayerCount()が常に0になるため、これをそのまま「レイヤー操作不可」の
-    // 判定に使う。押すとglWidget側でクラッシュしうる操作(レイヤー追加/複製/削除等)は
-    // すべてここでグレーアウトする。フォルダーの中に居るかどうかに関わらず、
-    // 現在のスコープに対して同じ操作が行える(computeRows()等がscope引数で
-    // 階層を吸収するため、ここではhasLayerの判定だけで両階層に共通して使える)。
+    // キャンバスタブが1つも開いていないとき(glWidgetがMainWindowのダミーCanvasWidgetを指している)はlayerCount()が常に0になるため、これをそのまま「レイヤー操作不可」の判定に使う。
     bool hasLayer = doc.layerCount() > 0;
     blendCombo->setEnabled(hasLayer);
     addRowBtn->setEnabled(hasLayer);
@@ -310,24 +291,22 @@ void LayerDock::updateControlsFromActiveLayer()
     const Layer &layer = doc.layers[doc.activeLayerIndex()];
     QSignalBlocker b1(blendCombo);
     if (layer.layerType == LayerType::Adjustment) {
-        // 調整レイヤー選択中は、ブレンドモードの代わりに調整の種類を選ぶコンボとして使う
+        // 調整レイヤー選択中は、ブレンドモードの代わりに調整の種類を選ぶコンボとして使う。
         populateBlendCombo(BlendComboMode::Adjustment);
         blendCombo->setCurrentIndex(blendCombo->findData((int)layer.adjustment.kind));
         blendCombo->setEnabled(true);
     } else if (layer.layerType == LayerType::Filter) {
-        // フィルターレイヤー選択中は、ブレンドモードの代わりに種類(ぼかし/色収差)
-        // を選ぶコンボとして使う(調整レイヤーと同じ考え方)。
+        // フィルターレイヤー選択中は、ブレンドモードの代わりに種類(ぼかし/色収差)を選ぶコンボとして使う(調整レイヤーと同じ考え方)。
         populateBlendCombo(BlendComboMode::Filter);
         blendCombo->setCurrentIndex(blendCombo->findData((int)layer.filter.kind));
         blendCombo->setEnabled(true);
     } else {
         populateBlendCombo(BlendComboMode::Blend);
         blendCombo->setCurrentIndex(blendCombo->findData((int)layer.blendMode));
-        // 単色レイヤーはブレンドモードを変更できない
+        // 単色レイヤーはブレンドモードを変更できない。
         blendCombo->setEnabled(layer.layerType == LayerType::Normal || layer.layerType == LayerType::Text);
     }
-    // 不透明度プレビュー(=旧不透明度スライダー)の状態を反映する。マスクを持つ
-    // レイヤーはGPUから濃淡プレビューを読み戻して表示、持たなければ一様グレー。
+    // 不透明度プレビュー(=旧不透明度スライダー)の状態を反映する。
     {
         int activeIndex = doc.activeLayerIndex();
         bool hasMask  = layer.hasMask;
@@ -337,15 +316,10 @@ void LayerDock::updateControlsFromActiveLayer()
         opacityLabel->setText(QString::number(qBound(0, qRound(layer.opacity * 100.0f), 100)) + "%");
     }
 
-    // フォルダーへのクリップ追加はまだ対応しない(フォルダーに対するクリッピングは
-    // 未実装のためスコープ外)。
+    // フォルダーへのクリップ追加はまだ対応しない(フォルダーに対するクリッピングは未実装のためスコープ外)。
     addColBtn->setEnabled(layer.layerType != LayerType::Folder);
 
-    // 「結合」: クリップ列(col>=1)なら常に有効(左隣に結合できる)。root列(col==0)
-    // なら、自分の行にクリップがあるか、1つ下の行が存在するときだけ有効
-    // (結合先が何もない、一番下の単独行のときだけ無効になる)。
-    // フォルダーの場合はオーバーライドされ、「中身をすべて結合する」の意味になるため、
-    // 判定基準も周囲の行の有無ではなく「中身(childCount)が1以上あるか」になる。
+    // 「結合」: クリップ列(col>=1)なら常に有効(左隣に結合できる)。
     QVector<QVector<int>> rows = computeRows(doc, currentScope());
     int activeIndex = doc.activeLayerIndex();
     bool canMerge = false;
@@ -362,9 +336,7 @@ void LayerDock::updateControlsFromActiveLayer()
     mergeBtn->setEnabled(canMerge);
 }
 
-// blendComboの中身を、通常のブレンドモード一覧/調整レイヤーの種類一覧/
-// フィルターレイヤーの種類一覧のいずれかに入れ替える。切り替えのたびに全項目を
-// 作り直すのは無駄なので、既に目的のモードになっていれば何もしない。
+// blendComboの中身を、通常のブレンドモード一覧/調整レイヤーの種類一覧/フィルターレイヤーの種類一覧のいずれかに入れ替える。
 void LayerDock::populateBlendCombo(BlendComboMode mode)
 {
     if (blendComboMode_ == mode) return;
@@ -374,9 +346,7 @@ void LayerDock::populateBlendCombo(BlendComboMode mode)
     blendCombo->clear();
 
     if (mode == BlendComboMode::Adjustment) {
-        // 無料版でも常に使えるものを先頭に。トーンカーブ・グラデーションマップは
-        // Pro限定だが一覧には常に出す(選んだ後にダブルクリックした時点で
-        // ProFeatureDialogに案内される。フィルターコンボと同じ考え方)。
+        // 無料版でも常に使えるものを先頭に。
         blendCombo->addItem("色相・彩度・明度",     (int)AdjustmentKind::HueSaturation);
         blendCombo->addItem("明るさ・コントラスト", (int)AdjustmentKind::BrightnessContrast);
         blendCombo->addItem("カラーバランス",       (int)AdjustmentKind::ColorBalance);
@@ -385,10 +355,7 @@ void LayerDock::populateBlendCombo(BlendComboMode mode)
         return;
     }
     if (mode == BlendComboMode::Filter) {
-        // 無料版でも常に使えるものを先頭に。色収差・レンズぼかしはPro限定だが
-        // 一覧には常に出す(選んだ後にダブルクリックした時点でProFeatureDialogに
-        // 案内される。フィルターメニューのPro限定項目自体が無料版にも常に
-        // 見えているのと同じ)。
+        // 無料版でも常に使えるものを先頭に。
         blendCombo->addItem("ぼかし",     (int)FilterKind::GaussianBlur);
         blendCombo->addItem("移動ぼかし", (int)FilterKind::MotionBlur);
         blendCombo->addItem("モザイク",   (int)FilterKind::Mosaic);
@@ -398,7 +365,7 @@ void LayerDock::populateBlendCombo(BlendComboMode mode)
         return;
     }
 
-    // 一覧はブラシの合成モードコンボ(ToolPropDock)と共有する(BlendModeList.h)。
+    // 一覧はブラシの合成モードコンボ(ToolPropertyDock)と共有する(BlendModeList.h)。
     for (const BlendModeItem &it : blendModeItems()) {
         if (it.isSeparator()) blendCombo->insertSeparator(blendCombo->count());
         else                  blendCombo->addItem(it.label, (int)it.mode);
@@ -423,10 +390,7 @@ void LayerDock::openFilterLayerEditor(int layerIndex)
     glWidget->editFilterLayer(layerIndex);
 }
 
-// 現在のスコープ(currentScope())内で、選択中レイヤーが属する行の直後に新規
-// レイヤーを挿入する場合のflat挿入位置を返す(該当行が無ければスコープの末尾)。
-// 対象がフォルダーなら、その中身もすべて含んだ直後(afterLayerBlock)に挿入する
-// ことで、誤ってフォルダーの中に紛れ込むことなく常に「兄弟」として積まれる。
+// 現在のスコープ(currentScope())内で、選択中レイヤーが属する行の直後に新規レイヤーを挿入する場合のflat挿入位置を返す(該当行が無ければスコープの末尾)。
 int LayerDock::computeInsertIndexInScope() const
 {
     const CanvasDocument &doc = glWidget->document();
@@ -444,8 +408,7 @@ void LayerDock::addRow()
     CanvasDocument &doc = glWidget->document();
     const int insertIndex = computeInsertIndexInScope();
 
-    // キャンバス作成時に "レイヤー1" が自動追加されるため、ここでは2から始まる
-    // ように既存の "レイヤーN" の最大値+1を採番する。
+    // キャンバス作成時に "レイヤー1" が自動追加されるため、ここでは2から始まるように既存の "レイヤーN" の最大値+1を採番する。
     const QString name = nextNumberedName(doc, "レイヤー", [](const Layer &l) {
         return l.layerType == LayerType::Normal;
     });
@@ -473,8 +436,7 @@ void LayerDock::addColumn()
     for (const auto &r : rows) {
         int col = r.indexOf(activeIndex);
         if (col >= 0) {
-            // フォルダーへのクリップ追加はまだ対応しない(addColBtn側でも無効化済み、
-            // ここは誤ってショートカット等から呼ばれた場合の防御)。
+            // フォルダーへのクリップ追加はまだ対応しない(addColBtn側でも無効化済み、ここは誤ってショートカット等から呼ばれた場合の防御)。
             if (doc.layers[r[0]].layerType == LayerType::Folder) return;
             insertIndex = r[col] + 1;
             rootName = doc.layers[r[0]].name;
@@ -484,8 +446,7 @@ void LayerDock::addColumn()
     }
     if (!foundRow) return; // アクティブレイヤーが現在のスコープに存在しない
 
-    // クリッピング先のレイヤー名を接頭辞にした連番(例: "レイヤー1" へのクリップ
-    // なら "レイヤー1_1", "レイヤー1_2", ...)にする。
+    // クリッピング先のレイヤー名を接頭辞にした連番(例: "レイヤー1" へのクリップなら "レイヤー1_1", "レイヤー1_2", ...)にする。
     const QString name = rootName.isEmpty()
         ? QStringLiteral("クリップレイヤー")
         : nextNumberedName(doc, rootName + "_", [](const Layer &) { return true; });
@@ -499,10 +460,7 @@ void LayerDock::addColumn()
     rebuildRows();
 }
 
-// 現在のスコープ(ルート、またはフォルダーの中)の、選択中の行の直後にフォルダーを
-// 1つ挿入する。ネストしたフォルダーもこの経路で作れる(挿入先スコープの
-// ancestorFolders=folderPath_をそのままCanvasDocument::addLayerへ渡すだけで、
-// 新しいフォルダー自身のchildCountは0から始まる)。
+// 現在のスコープ(ルート、またはフォルダーの中)の、選択中の行の直後にフォルダーを1つ挿入する。
 void LayerDock::addFolder()
 {
     CanvasDocument &doc = glWidget->document();
@@ -522,8 +480,6 @@ void LayerDock::addFolder()
 }
 
 // インジケーター上の星形(フォルダー)をダブルクリックしたときに呼ばれる。
-// レイヤーリスト・インジケーターの双方を「そのフォルダーの中身だけを表示」する
-// 状態に切り替える(現時点ではフォルダーは実際に中身を持たないため、常に空になる)。
 void LayerDock::enterFolder(int folderLayerIndex)
 {
     const CanvasDocument &doc = glWidget->document();
@@ -536,7 +492,6 @@ void LayerDock::enterFolder(int folderLayerIndex)
 }
 
 // パンくずリストのセグメントをクリックしたときに呼ばれる。
-// keepCount段まで階層を戻る(0ならルートへ戻る)。
 void LayerDock::goToBreadcrumbLevel(int keepCount)
 {
     if (keepCount >= folderPath_.size()) return;
@@ -585,7 +540,7 @@ void LayerDock::rebuildBreadcrumb()
     breadcrumbLayout_->addStretch();
 }
 
-// 現在のスコープ内、選択中レイヤーのすぐ後ろに、単色(白)レイヤーを挿入する
+// 現在のスコープ内、選択中レイヤーのすぐ後ろに、単色(白)レイヤーを挿入する。
 void LayerDock::insertSolidColorLayer()
 {
     CanvasDocument &doc = glWidget->document();
@@ -604,8 +559,7 @@ void LayerDock::insertSolidColorLayer()
     rebuildRows();
 }
 
-// 空のテキストレイヤーを作成するだけ(文字の入力はテキストツールでこのレイヤーを
-// クリックしてから行う。CanvasWidget::startOrEditTextLayerAt参照)
+// 空のテキストレイヤーを作成するだけ。
 void LayerDock::insertTextLayer()
 {
     CanvasDocument &doc = glWidget->document();
@@ -625,9 +579,6 @@ void LayerDock::insertTextLayer()
 }
 
 // 調整レイヤーを作成する(デフォルトは色相・彩度・明度、全パラメータ0)。
-// パネルはこの時点では開かず、レイヤーリストでプレビューをダブルクリックした
-// ときに開く(CanvasWidget::editAdjustmentLayer参照)。種類は上部のブレンドモード
-// コンボ(調整レイヤー選択中は種類選択として働く)から後で切り替えられる。
 void LayerDock::insertAdjustmentLayer()
 {
     CanvasDocument &doc = glWidget->document();
@@ -643,21 +594,18 @@ void LayerDock::insertAdjustmentLayer()
     }
     doc.layers[insertIndex].adjustment.kind = AdjustmentKind::HueSaturation;
     doc.setActiveLayer(insertIndex);
-    // adjustment.kindを入れてからcommitする(Redoで種類を復元するため)
+    // adjustment.kindを入れてからcommitする(Redoで種類を復元するため)。
     glWidget->commitLayerAddUndo(insertIndex, folderPath_);
     rebuildRows();
 }
 
-// フィルターレイヤーを作成する(現時点では種類は色収差のみ)。調整レイヤーと同じく
-// パネルはこの時点では開かず、レイヤーリストでプレビューをダブルクリックしたときに
-// 開く(CanvasWidget::editFilterLayer参照)。
+// フィルターレイヤーを作成する(現時点では種類は色収差のみ)。
 void LayerDock::insertFilterLayer()
 {
     CanvasDocument &doc = glWidget->document();
     const int insertIndex = computeInsertIndexInScope();
 
-    // 種類名を名前に含めない("フィルター1"等)。後から種類を切り替えても
-    // (上部のコンボ、populateBlendCombo(Filter)参照)名前が古いままにならないため。
+    // 種類名を名前に含めない("フィルター1"等)。
     const QString name = nextNumberedName(doc, "フィルター", [](const Layer &l) {
         return l.layerType == LayerType::Filter;
     });
@@ -666,13 +614,11 @@ void LayerDock::insertFilterLayer()
         glWidget->abortLayerAddUndo();
         return;
     }
-    // 既定はガウスぼかし(無料版でも常に使える種類)。色収差はPro限定なので、
-    // 作成直後にいきなりProFeatureDialogが出るのを避ける。
+    // 既定はガウスぼかし(無料版でも常に使える種類)。
     FilterParams fp;
     fp.kind = FilterKind::GaussianBlur;
     fp.blurRadiusPx = 8.0f;
-    // ノイズの乱数の種はここで決めておく(後から種類をノイズへ切り替えたときのため。
-    // FilterLayerEditAction::onActivateはこの値をそのまま使い続けるだけで振り直さない)。
+    // ノイズの乱数の種はここで決めておく(後から種類をノイズへ切り替えたときのため。FilterLayerEditAction::onActivateはこの値をそのまま使い続けるだけで振り直さない)。
     fp.nsSeed = QRandomGenerator::global()->generate();
     doc.layers[insertIndex].filter = fp;
     doc.setActiveLayer(insertIndex);
@@ -689,9 +635,6 @@ void LayerDock::deleteActiveLayer()
 }
 
 // 選択中レイヤーの列(root/クリップ)に応じて複製処理を振り分ける。
-// ・root列(col==0): 選択中レイヤーが属する行を、クリッピング構成ごと丸ごと
-//   1つ上に複製する(クリップが無ければ選択中レイヤーのみの複製になる)
-// ・クリップ列(col>=1): 選択中レイヤーを、同じ行の右隣にクリップ列として複製する
 void LayerDock::duplicateSelected()
 {
     CanvasDocument &doc = glWidget->document();
@@ -705,15 +648,12 @@ void LayerDock::duplicateSelected()
 
         if (col == 0 && doc.layers[r[0]].layerType == LayerType::Folder) {
             // フォルダーの「複製」は中身(ネストも含む)ごと丸ごと複製する
-            // オーバーライド。挿入位置は通常のroot列複製と同じく直後(=1つ上の行)。
             int insertAt = afterLayerBlock(doc, r.last());
             int newFolderIndex = duplicateFolderDeep(r[0], insertAt);
             if (newFolderIndex < 0) return;
             doc.setActiveLayer(newFolderIndex);
         } else if (col == 0) {
             // 元の行の直後(上)へ、列の並び順を保ったまま複製していく。
-            // 複製の挿入先は常に既存レイヤーより後ろなので、rの各要素の
-            // インデックスは複製が進んでも変わらない。
             int insertAt = afterLayerBlock(doc, r.last());
             int newActiveIndex = insertAt;
             for (int i = 0; i < r.size(); i++) {
@@ -730,7 +670,7 @@ void LayerDock::duplicateSelected()
             if (newIndex < 0) { glWidget->abortLayerAddUndo(); return; }
             doc.setLayerClipping(newIndex, true); // 右隣は必ずクリップ列になる
             doc.setActiveLayer(newIndex);
-            // clippingを立ててからcommitする(Redoで復元されるのはcommit時点の状態)
+            // clippingを立ててからcommitする(Redoで復元されるのはcommit時点の状態)。
             glWidget->commitLayerAddUndo(newIndex, folderPath_, /*duplicateSourceIndex=*/activeIndex);
         }
         rebuildRows();
@@ -738,25 +678,20 @@ void LayerDock::duplicateSelected()
     }
 }
 
-// sourceFolderIndexの中身(ネストしたフォルダーも含む)を丸ごと複製し、insertAtへ
-// 挿入する。元の階層構造をそのまま再現するため、複製元の各要素を先頭(フォルダー
-// 自身)から順になぞりながら、複製先の新しいフォルダーindexへの対応表を作り、
-// 各要素が実際に属していた祖先フォルダー(複製後のindexに読み替えたもの)を
-// ancestorFoldersとしてduplicateLayerへ渡す。
+// sourceFolderIndexの中身(ネストしたフォルダーも含む)を丸ごと複製し、insertAtへ挿入する。
 int LayerDock::duplicateFolderDeep(int sourceFolderIndex, int insertAt)
 {
     CanvasDocument &doc = glWidget->document();
     const int count = 1 + doc.layers[sourceFolderIndex].childCount;
 
     QHash<int, int> oldToNew;
-    // 元配列上での祖先チェーン(範囲判定にのみ使う。複製処理中はsourceFolderIndex
-    // より前の実データなので不変)。
+    // 元配列上での祖先チェーン(範囲判定にのみ使う。複製処理中はsourceFolderIndexより前の実データなので不変)。
     QVector<int> oldStack{ sourceFolderIndex };
 
     for (int k = 0; k < count; k++) {
         const int srcIdx = sourceFolderIndex + k;
 
-        // oldStackを、srcIdxが実際に含まれる範囲まで閉じる
+        // oldStackを、srcIdxが実際に含まれる範囲まで閉じる。
         while (oldStack.size() > 1) {
             int top = oldStack.last();
             int topEnd = top + 1 + doc.layers[top].childCount;
@@ -764,7 +699,7 @@ int LayerDock::duplicateFolderDeep(int sourceFolderIndex, int insertAt)
             oldStack.removeLast();
         }
 
-        // oldStack(祖先の元index列、srcIdx自身は除く)を複製後のindexへ読み替える
+        // oldStack(祖先の元index列、srcIdx自身は除く)を複製後のindexへ読み替える。
         QVector<int> ancestors = folderPath_;
         for (int old : oldStack) {
             if (old == srcIdx) continue; // k==0(フォルダー自身)のときはoldStack==[srcIdx]
@@ -784,9 +719,6 @@ int LayerDock::duplicateFolderDeep(int sourceFolderIndex, int insertAt)
 }
 
 // 選択中レイヤーの列(root/クリップ)に応じて結合処理を振り分ける。
-// ・クリップ列(col>=1): 選択中レイヤーを、同じ行で1つ左(直前)の列に結合する
-// ・root列(col==0): 選択中レイヤーが属する行を、クリッピング構成ごと丸ごと
-//   1つ下の行へ結合する(mergeRootRow参照)
 void LayerDock::mergeSelected()
 {
     CanvasDocument &doc = glWidget->document();
@@ -806,8 +738,7 @@ void LayerDock::mergeSelected()
                 rebuildRows();
             }
         } else if (doc.layers[activeIndex].layerType == LayerType::Folder) {
-            // フォルダーの「結合」は行そのものではなく、フォルダーの中身をすべて
-            // 1枚のレイヤーへまとめる操作としてオーバーライドする。
+            // フォルダーの「結合」は行そのものではなく、フォルダーの中身をすべて1枚のレイヤーへまとめる操作としてオーバーライドする。
             mergeFolderContents(activeIndex);
         } else {
             mergeRootRow(activeIndex);
@@ -817,11 +748,6 @@ void LayerDock::mergeSelected()
 }
 
 // rootIndexが属する行(一番左の列)を結合する。
-// ・自分の行にクリッピングがかかっていれば、それをすべてrootへ結合する
-//   (1つ下の行には触れない)
-// ・クリッピングが無ければ、1つ下の行のrootとだけ結合する。1つ下の行に
-//   クリッピングがかかっていても無視し、rootどうしだけを結合する
-//   (結果、その分クリッピングがずれてキャンバスの見た目は変わりうるが、それでよい)
 void LayerDock::mergeRootRow(int rootIndex)
 {
     CanvasDocument &doc = glWidget->document();
@@ -832,8 +758,7 @@ void LayerDock::mergeRootRow(int rootIndex)
     if (r < 0) return;
 
     if (rows[r].size() > 1) {
-        // 同じ行のクリップ列は常にrootIndexより大きいインデックスなので、
-        // 結合してもrootIndex自体はずれない。
+        // 同じ行のクリップ列は常にrootIndexより大きいインデックスなので、結合してもrootIndex自体はずれない。
         int activeIndex = rootIndex;
         for (;;) {
             QVector<QVector<int>> rows2 = computeRows(doc, scope);
@@ -856,10 +781,7 @@ void LayerDock::mergeRootRow(int rootIndex)
     rebuildRows();
 }
 
-// folderIndexの直接の中身をすべて1枚のNormalレイヤーへ結合し、フォルダーの
-// マーカー自体は(結合後のレイヤーを残したまま)取り除く。ネストしたフォルダーが
-// 混ざっている場合や、Normal以外の種類(単色/調整/テキスト)が混ざっている場合は
-// mergeLayers()自体がそれらを結合できないため、何もしない(現状では未対応)。
+// folderIndexの直接の中身をすべて1枚のNormalレイヤーへ結合し、フォルダーのマーカー自体は(結合後のレイヤーを残したまま)取り除く。
 void LayerDock::mergeFolderContents(int folderIndex)
 {
     CanvasDocument &doc = glWidget->document();
@@ -873,8 +795,7 @@ void LayerDock::mergeFolderContents(int folderIndex)
     }
     if (children.isEmpty()) return;
 
-    // 下から順に1つ上へ結合していく。結合のたびにvictim(survivor+1)が消えて
-    // それより上のレイヤーが1つ繰り上がるため、次の相手は常にsurvivor+1のまま。
+    // 下から順に1つ上へ結合していく。
     int survivor = children[0];
     for (int k = 1; k < children.size(); k++) {
         int newIndex = glWidget->mergeLayers(survivor, survivor + 1, folderPath_ + QVector<int>{ folderIndex });
@@ -882,9 +803,7 @@ void LayerDock::mergeFolderContents(int folderIndex)
         survivor = newIndex;
     }
 
-    // 実レイヤーが1枚だけ残ったfolderIndexのマーカーを、中身(survivor)を巻き込まず
-    // 取り除く(includeContents=false)。マーカーはsurvivorの直前(folderIndex ==
-    // children[0]-1 == survivor-1)にあるので、除去後survivorは1つ繰り上がる。
+    // 実レイヤーが1枚だけ残ったfolderIndexのマーカーを、中身(survivor)を巻き込まず取り除く(includeContents=false)。
     if (!glWidget->removeLayer(folderIndex, folderPath_, /*includeContents=*/false)) return;
 
     doc.setActiveLayer(folderIndex); // マーカー除去でsurvivorがちょうどfolderIndexの位置に来る
@@ -893,18 +812,14 @@ void LayerDock::mergeFolderContents(int folderIndex)
 
 void LayerDock::scheduleRefresh()
 {
-    // ストローク確定の連打や不透明度スライダーのドラッグ等でlayersChanged()が
-    // 短時間に連続発火しても、都度refresh()(フルキャンバス合成を伴いうる重い
-    // サムネイル再生成)を実行せず、一定時間発火が止まってから最後の1回だけ
-    // まとめて実行する。
+    // ストローク確定の連打や不透明度スライダーのドラッグ等でlayersChanged()が短時間に連続発火しても、都度refresh()(フルキャンバス合成を伴いうる重いサムネイル再生成)を実行せず、
+    // 一定時間発火が止まってから最後の1回だけまとめて実行する。
     refreshDebounceTimer_->start(80);
 }
 
 void LayerDock::refresh()
 {
-    // ストローク中/ペンのホバー中は、アクティブレイヤーのサムネイル再生成
-    // (タイルのGPU→CPU読み戻しを伴う)を先送りする(NavigatorDock::refreshと
-    // 同じ理由: 文字書きの連打中に次のペンダウンを塞がない)。
+    // ストローク中/ペンのホバー中は、アクティブレイヤーのサムネイル再生成(タイルのGPU→CPU読み戻しを伴う)を先送りする(NavigatorDock::refreshと同じ理由: 文字書きの連打中に次のペンダウンを塞がない)。
     if (glWidget && glWidget->isGLReady() && glWidget->isInkingBusy()) {
         refreshDebounceTimer_->start(150);
         return;
@@ -913,13 +828,11 @@ void LayerDock::refresh()
     CanvasDocument &doc = glWidget->document();
     QVector<QVector<int>> rows = computeRows(doc, currentScope());
 
-    // 行の枚数、または行ごとの列数(クリップの追加/削除)が変わっていたら
-    // 行ウィジェットを作り直す。それ以外はスライダー操作中のフォーカスが
-    // 飛ばないよう、各行の中身だけを更新する。
+    // 行の枚数、または行ごとの列数(クリップの追加/削除)が変わっていたら行ウィジェットを作り直す。
     bool shapeChanged = (rows.size() != rows_.size());
     if (!shapeChanged) {
         for (int i = 0; i < rows_.size(); i++) {
-            // rows_ は上(最前面)から並んでいるので、対応する rows のインデックスは逆順
+            // rows_ は上(最前面)から並んでいるので、対応する rows のインデックスは逆順。
             int dataRow = rows_.size() - 1 - i;
             if (rows_[i]->rowLayers().size() != rows[dataRow].size()) {
                 shapeChanged = true;

@@ -1,4 +1,4 @@
-#include "dialogs/CalibrationDlg.h"
+#include "dialogs/CalibrationDialog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -7,7 +7,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 
-CalibrationDlg::CalibrationDlg(QWidget *parent)
+CalibrationDialog::CalibrationDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(QStringLiteral("モニターキャリブレーション"));
@@ -37,14 +37,14 @@ CalibrationDlg::CalibrationDlg(QWidget *parent)
     layout->addLayout(btnRow);
 
     for (QSlider *s : {brightnessSlider_, contrastSlider_, cyanSlider_, magentaSlider_, yellowSlider_})
-        connect(s, &QSlider::valueChanged, this, &CalibrationDlg::emitValuesChanged);
-    connect(resetBtn, &QPushButton::clicked, this, &CalibrationDlg::resetValues);
+        connect(s, &QSlider::valueChanged, this, &CalibrationDialog::emitValuesChanged);
+    connect(resetBtn, &QPushButton::clicked, this, &CalibrationDialog::resetValues);
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::close);
 
     setFixedWidth(340);
 }
 
-QWidget *CalibrationDlg::makeRow(const QString &labelText, QSlider *&sliderOut, QLabel *&valueLabelOut)
+QWidget *CalibrationDialog::makeRow(const QString &labelText, QSlider *&sliderOut, QLabel *&valueLabelOut)
 {
     auto *row = new QWidget(this);
     auto *h = new QHBoxLayout(row);
@@ -68,7 +68,7 @@ QWidget *CalibrationDlg::makeRow(const QString &labelText, QSlider *&sliderOut, 
     return row;
 }
 
-void CalibrationDlg::emitValuesChanged()
+void CalibrationDialog::emitValuesChanged()
 {
     brightnessValueLabel_->setText(QString::number(brightnessSlider_->value()));
     contrastValueLabel_->setText(QString::number(contrastSlider_->value()));
@@ -80,13 +80,13 @@ void CalibrationDlg::emitValuesChanged()
                         cyanSlider_->value(), magentaSlider_->value(), yellowSlider_->value());
 }
 
-void CalibrationDlg::resetValues()
+void CalibrationDialog::resetValues()
 {
     setValues(0, 0, 0, 0, 0);
     emitValuesChanged();
 }
 
-void CalibrationDlg::setValues(int brightness, int contrast, int cyan, int magenta, int yellow)
+void CalibrationDialog::setValues(int brightness, int contrast, int cyan, int magenta, int yellow)
 {
     const QSignalBlocker b1(brightnessSlider_), b2(contrastSlider_),
                           b3(cyanSlider_), b4(magentaSlider_), b5(yellowSlider_);

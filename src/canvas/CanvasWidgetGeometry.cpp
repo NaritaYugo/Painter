@@ -54,18 +54,13 @@ void CanvasWidget::resetDocument()
 {
     makeCurrent();
  
-    // 使用中の全スライスをゼロクリア(バンク境界をまたいでも clearSliceRange が分割処理する)
+    // 使用中の全スライスをゼロクリア(バンク境界をまたいでも clearSliceRange が分割処理する)。
     clearSliceRange(0, sliceAllocator_.nextSlice(), 0.0f, 0.0f, 0.0f, 0.0f);
  
-    // スライス管理をリセット
+    // スライス管理をリセット。
     sliceAllocator_.resetAllocationState();
 
     // CanvasDocument をリセット: 全レイヤーを捨てる
-    // (所有権はCanvasWidget外にあるので、作り直すのではなく中身だけ空にする)
-    //
-    // addLayer()自体がdoc_->onChanged経由でupdate()を呼び得るため、
-    // レイヤーがまだ0件のこの時点で誤発火しないようガードする
-    // (呼び出し元がこの後レイヤーを追加してからemit layersChanged()する想定)
     m_initializing = true;
     doc_->resetToBlank();
     doc_->initTileGrid(canvasW, canvasH);
@@ -100,11 +95,7 @@ QVector<QByteArray> CanvasWidget::readSlicePixelsBatch(const QVector<int> &slice
     return undoRecorder_.readSlicesBatch(toolCtx_, slices);
 }
 
-// ===========================================================================
 // 内部ヘルパー
-// ===========================================================================
-// growLayerTexArray() / allocContiguousSlices() / freeSlice() は
-// LayerSliceAllocator に移動した(sliceAllocator_)
 
 QByteArray CanvasWidget::loadShaderSource(const QString &path) {
     QFile file(path);
@@ -140,13 +131,6 @@ QColor CanvasWidget::getPixelColor(const QPointF &widgetPos, bool referenceCanva
     }
 
     // 全レイヤーを合成したキャンバス(compositedTex)を最新化する。
-    // 【重要】この呼び出しは、下で読み取り用FBOを作って束縛するより「前」でなければ
-    // ならない。updateCompositedTex()は内部で自前のFBOを使い、最後に
-    // glBindFramebuffer(GL_FRAMEBUFFER, 0)(=読み書き両方を0に戻す)するため、
-    // 先にこちらのFBOを束縛してから呼ぶと、それが外されたまま次の
-    // glFramebufferTexture2D()がデフォルトフレームバッファに対する不正な操作になり、
-    // 続くglReadPixels()がデフォルトフレームバッファ(Qtの描画先ではない)を読んで
-    // 常に空=透明を返していた(スポイトの「プレビューから取得」が必ず透明になる不具合)。
     if (referenceCanvas)
         updateCompositedTex();
 
@@ -160,7 +144,7 @@ QColor CanvasWidget::getPixelColor(const QPointF &widgetPos, bool referenceCanva
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                 GL_TEXTURE_2D, toolCtx_.compositedTex, 0);
     } else {
-        // 現在のレイヤーのみから拾う
+        // 現在のレイヤーのみから拾う。
         int tx = sx / TILE_SIZE;
         int ty = sy / TILE_SIZE;
         int si = doc_->activeLayer().tileSliceAtCanvasTile(tx, ty);
@@ -181,15 +165,8 @@ QColor CanvasWidget::getPixelColor(const QPointF &widgetPos, bool referenceCanva
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
     glDeleteFramebuffers(1, &fbo);
 
-    // レイヤーのタイルも合成結果(compositedTex)も、中身は「乗算済みアルファ
-    // (premultiplied)」で格納されている(描画色を作るtoPreMulColor()と、
+    // レイヤーのタイルも合成結果(compositedTex)も、中身は「乗算済みアルファ(premultiplied)」で格納されている(描画色を作るtoPreMulColor()と、
     // common.glslのnormalBlend()=fg+bg*(1-fg.a)がその形式を前提にしている)。
-    // 一方、この関数の戻り値を受け取る側(スポイト→ToolConfig::setRawRGBA())が
-    // 扱うのは非乗算(ストレート)の生の色なので、ここでアルファを割り戻す。
-    //
-    // 割り戻しを忘れると、拾った色をそのまま描画色にして塗る→また拾う…の
-    // 繰り返しで、塗るたびにRGBへアルファが二重・三重に掛かっていき、色が
-    // 循環のたびに暗く(=RGBが0へ向かうので明度も彩度も低下)なっていく。
     const float a = pixel[3] / 255.0f;
     if (a <= 0.0f) return Qt::transparent; // 完全透明: 色情報が無い(呼び出し側で判断する)
     const auto unpremul = [a](uint8_t c) {
@@ -198,31 +175,26 @@ QColor CanvasWidget::getPixelColor(const QPointF &widgetPos, bool referenceCanva
     return QColor(unpremul(pixel[0]), unpremul(pixel[1]), unpremul(pixel[2]), pixel[3]);
 }
 
-// ===========================================================================
-// キャンバスの再構築（MainWindowから呼ばれる）
-// ===========================================================================
+// キャンバスの再構築（MainWindowから呼ばれる）。
 void CanvasWidget::recreateCanvas(int w, int h, bool createDefaultLayers, bool wrapX, bool wrapY) {
     makeCurrent(); // OpenGLコンテキストをアクティブにする（必須）
 
-    // 1. 古いテクスチャを破棄
+    // 1.
     freeTextures();
 
-    // 2. サイズ変数の更新
+    // 2.
     canvasW = w;
     canvasH = h;
 
     // 3. ドキュメントの完全リセット
-    // (所有権はCanvasWidget外にあるので、作り直すのではなく中身だけ空にする)
     sliceAllocator_.resetAllocationState();
     doc_->resetToBlank();
     doc_->setWrap(wrapX, wrapY);
 
     // 4. 新しいサイズでテクスチャ群を再生成し、初期レイヤーを作る
-    // (createDefaultLayers=falseの場合はレイヤーを1枚も作らない。PsdCodec::loadが
-    //  PSD側のレイヤー構成をそのまま復元するために使う)
     initTextures(createDefaultLayers);
 
-    // canvasW/H・テクスチャIDが変わったので toolCtx_ も更新
+    // canvasW/H・テクスチャIDが変わったので toolCtx_ も更新。
     setupToolContext();
 
     fitCanvasToView();
@@ -232,19 +204,7 @@ void CanvasWidget::recreateCanvas(int w, int h, bool createDefaultLayers, bool w
     update();
 }
 
-// ===========================================================================
-// キャンバスサイズ変更(編集アクション「キャンバスサイズ変更」の確定処理)
-// ---------------------------------------------------------------------------
-// recreateCanvas()と違い、既存レイヤーの中身を保持したままキャンバスの
-// 縦横サイズを変える(内側へのトリミング/外側への拡張どちらも可)。
-// タイル境界の再配置を伴うため、いったん全レイヤーをCPU側のQImageへ読み出し、
-// オフセット付きで新サイズのQImageに描き直してからタイルへ書き戻す
-// (この操作の頻度は低いため、GPU compute化はせずCPUで完結させている)。
-//
-// タイルグリッド自体が変わる(=通常のTileUndo差分方式が使えない)ため、
-// Undoは変更前後の全レイヤースナップショットを丸ごと保持するCanvasResizeエントリで行う
-// (CanvasDocument::UndoKind::CanvasResize)。
-// ===========================================================================
+// キャンバスサイズ変更(編集アクション「キャンバスサイズ変更」の確定処理)recreateCanvas()と違い、既存レイヤーの中身を保持したままキャンバスの縦横サイズを変える(内側へのトリミング/外側への拡張どちらも可)。
 QVector<LayerSnapshotData> CanvasWidget::captureAllLayerSnapshots()
 {
     QVector<LayerSnapshotData> result;
@@ -254,14 +214,7 @@ QVector<LayerSnapshotData> CanvasWidget::captureAllLayerSnapshots()
     for (int li = 0; li < doc_->layerCount(); li++) {
         const Layer &layer = doc_->layers[li];
 
-        // 単色レイヤー/調整レイヤーは実ピクセルデータを持たない(単色は常に手続き的な
-        // 不透明白、調整レイヤーは下のレイヤーへの色調整のみ)ため、タイルを読み出す
-        // 必要はない。layerType/adjustmentだけスナップショットに残し、復元側
-        // (rebuildCanvasFromSnapshots)で同じ種類のレイヤーとして作り直す。
-        // テキストレイヤーはNormalと同様に実ピクセルを持つので、下の通常経路で
-        // 画像として読み出す(text自体もメタデータとして一緒に保存する)。
-        // マスクを持つ場合、種類に関わらずキャンバス全体ぶんのグレースケール画像として
-        // 読み出しておく(単色/調整/フォルダーレイヤーでもマスク自体は独立して持てる)。
+        // 単色レイヤー/調整レイヤーは実ピクセルデータを持たない(単色は常に手続き的な不透明白、調整レイヤーは下のレイヤーへの色調整のみ)ため、タイルを読み出す必要はない。
         QImage maskImg;
         if (layer.hasMask) {
             QVector<int> maskSlices;
@@ -301,10 +254,8 @@ QVector<LayerSnapshotData> CanvasWidget::captureAllLayerSnapshots()
             continue;
         }
 
-        // まずこのレイヤーの全タイルのslice番号(存在するもののみ)とキャンバス上の
-        // タイル座標(tx,ty)を集め、readSlicePixelsBatch()でPBOパイプライン化して
-        // まとめて読み出す(タイルごとに逐次glReadPixelsするより、GPU→CPU転送の
-        // ストールが少ない)。
+        // まずこのレイヤーの全タイルのslice番号(存在するもののみ)とキャンバス上のタイル座標(tx,ty)を集め、readSlicePixelsBatch()でPBOパイプライン化してまとめて読み出す(タイルごとに逐次glReadPixelsする
+        // より、GPU→CPU転送のストールが少ない)。
         QVector<int> slices;
         QVector<QPoint> tileCoords;
         for (int ty = 0; ty < tilesY; ty++) {
@@ -340,8 +291,7 @@ QVector<LayerSnapshotData> CanvasWidget::captureAllLayerSnapshots()
     return result;
 }
 
-// snaps: 復元するレイヤー内容(各QImageは既にnewW x newHの解像度に合わせて描画済みである必要はなく、
-// offsetX,offsetYを使って新キャンバス上の正しい位置に配置される)。
+// snaps: 復元するレイヤー内容(各QImageは既にnewW x newHの解像度に合わせて描画済みである必要はなく、offsetX,offsetYを使って新キャンバス上の正しい位置に配置される)。
 void CanvasWidget::rebuildCanvasFromSnapshots(int newW, int newH, const QVector<LayerSnapshotData> &snaps,
                                            int activeIndex, int offsetX, int offsetY)
 {
@@ -370,9 +320,7 @@ void CanvasWidget::rebuildCanvasFromSnapshots(int newW, int newH, const QVector<
         doc_->layerRef(newIdx).solidColor = snap.solidColor;
         doc_->layerRef(newIdx).childCount = snap.childCount; // Folderのときのみ意味を持つ
 
-        // マスクを持っていた場合、新しいキャンバスサイズ用にタイルを確保し直し、
-        // 色レイヤーの中身と同じくoffsetX/offsetYぶんずらして書き戻す(マスクも
-        // レイヤー本体と同じ位置関係を保つ必要があるため)。
+        // マスクを持っていた場合、新しいキャンバスサイズ用にタイルを確保し直し、色レイヤーの中身と同じくoffsetX/offsetYぶんずらして書き戻す(マスクもレイヤー本体と同じ位置関係を保つ必要があるため)。
         if (snap.hasMask && addLayerMask(newIdx)) {
             QImage newMaskImg(newW, newH, QImage::Format_RGBA8888_Premultiplied);
             newMaskImg.fill(Qt::white);
@@ -398,10 +346,7 @@ void CanvasWidget::rebuildCanvasFromSnapshots(int newW, int newH, const QVector<
             }
         }
 
-        // 単色レイヤー/調整レイヤー/フィルターレイヤー/フォルダーはタイルを持たない
-        // (単色は手続き的な不透明白、調整とフィルターは下のレイヤーへの加工のみ、
-        // フォルダーはUI上のマーカーのみ)ので、ピクセルの書き戻しは不要。
-        // テキストレイヤーはNormalと同様に実ピクセルを持つので下の経路で書き戻す。
+        // 単色レイヤー/調整レイヤー/フィルターレイヤー/フォルダーはタイルを持たない(単色は手続き的な不透明白、調整とフィルターは下のレイヤーへの加工のみ、フォルダーはUI上のマーカーのみ)ので、ピクセルの書き戻しは不要。
         if (snap.layerType == LayerType::SolidColor || snap.layerType == LayerType::Adjustment
             || snap.layerType == LayerType::Filter || snap.layerType == LayerType::Folder)
             continue;
@@ -435,10 +380,8 @@ void CanvasWidget::rebuildCanvasFromSnapshots(int newW, int newH, const QVector<
     if (doc_->layerCount() > 0)
         doc_->setActiveLayer(qBound(0, activeIndex, doc_->layerCount() - 1));
 
-    // 大量のglTexSubImage3D書き込み(writeSlicePixels)がGPU側でまだ実行中のうちに
-    // 次のフレームのpaintGL()がこのlayerTexArrayを読みに行くと、タイミング次第で
-    // ドライバ側の状態が不整合になりクラッシュしうる。update()で再描画を要求する前に
-    // ここまでの書き込みを確実に完了させる。
+    // 大量のglTexSubImage3D書き込み(writeSlicePixels)がGPU側でまだ実行中のうちに次のフレームのpaintGL()がこのlayerTexArrayを読みに行くと、
+    // タイミング次第でドライバ側の状態が不整合になりクラッシュしうる。
     glFinish();
 
     fitCanvasToView();
@@ -452,8 +395,7 @@ void CanvasWidget::applyCanvasResizeUndoEntry(const UndoEntry &entry, bool toBef
     const CanvasResizeUndoData &rd = entry.resize;
     if (toBefore) {
         rebuildCanvasFromSnapshots(rd.oldW, rd.oldH, rd.beforeLayers, rd.activeLayerIndexBefore, 0, 0);
-        // rebuildCanvasFromSnapshots内のresetToBlank()でredoStackも失われるため、
-        // このリサイズ自身をredoできるよう積み直す
+        // rebuildCanvasFromSnapshots内のresetToBlank()でredoStackも失われるため。
         doc_->restoreRedoEntryAfterRebuild(entry);
     } else {
         rebuildCanvasFromSnapshots(rd.newW, rd.newH, rd.afterLayers, rd.activeLayerIndexAfter, 0, 0);
@@ -475,7 +417,6 @@ bool CanvasWidget::resizeCanvasKeepingContent(int newW, int newH, int offsetX, i
     rebuildCanvasFromSnapshots(newW, newH, beforeLayers, savedActiveIndex, offsetX, offsetY);
 
     // Undo用に、変更後の状態も丸ごとスナップショットしておく
-    // (低頻度の操作なので、GPUから読み直すシンプルな実装で構わない)
     UndoEntry entry;
     entry.kind = UndoKind::CanvasResize;
     entry.resize.oldW = oldW;
@@ -492,21 +433,13 @@ bool CanvasWidget::resizeCanvasKeepingContent(int newW, int newH, int offsetX, i
     return true;
 }
 
-// ===========================================================================
-// キャンバスの回転・反転(編集メニュー「ファイル」の回転/反転コマンド)
-// ---------------------------------------------------------------------------
-// 見た目(ViewTransform)ではなく、全レイヤーの実ピクセルデータを書き換える。
-// resizeCanvasKeepingContent/resampleCanvasResolutionと同じ「スナップショット
-// 取得→各レイヤーのQImageを変換→rebuildCanvasFromSnapshotsで焼き直す→
-// CanvasResize Undoエントリを積む」パターンを流用する。
-// ===========================================================================
+// キャンバスの回転・反転(編集メニュー「ファイル」の回転/反転コマンド)見た目(ViewTransform)ではなく、全レイヤーの実ピクセルデータを書き換える。
 bool CanvasWidget::rotateCanvas(int ccwDegrees)
 {
     if (ccwDegrees != 90 && ccwDegrees != 180 && ccwDegrees != 270) return false;
     if (!doc_ || doc_->layers.isEmpty()) return false;
 
-    // レイヤー構成を丸ごと作り直す破壊的な操作なので、他の編集アクションは
-    // 実行前に確定せずキャンセルする(他のstart*Action系と同じ排他パターン)。
+    // レイヤー構成を丸ごと作り直す破壊的な操作なので、他の編集アクションは実行前に確定せずキャンセルする(他のstart*Action系と同じ排他パターン)。
     actions_.cancelActive(); // 変形/色調整/フィルター/レイヤー編集系(controller管理アクション)は互いに排他
 
     makeCurrent();
@@ -519,9 +452,7 @@ bool CanvasWidget::rotateCanvas(int ccwDegrees)
     const QVector<LayerSnapshotData> beforeLayers = captureAllLayerSnapshots();
     const int savedActiveIndex = doc_->activeLayerIndex();
 
-    // タイル格納(≒QImage)はY下向きの通常の画像座標系を採用しているため、
-    // QTransform::rotate()に正の角度を渡すと画面上は時計回りになる。反時計回り
-    // にするため符号を反転する。
+    // タイル格納(≒QImage)はY下向きの通常の画像座標系を採用しているため、QTransform::rotate()に正の角度を渡すと画面上は時計回りになる。
     QTransform t;
     t.rotate(-ccwDegrees);
     QVector<LayerSnapshotData> rotatedLayers = beforeLayers;
@@ -561,8 +492,7 @@ bool CanvasWidget::flipCanvasBy(bool horizontal, bool vertical)
 {
     if (!doc_ || doc_->layers.isEmpty()) return false;
 
-    // レイヤー構成を丸ごと作り直す破壊的な操作なので、他の編集アクションは
-    // 実行前に確定せずキャンセルする(他のstart*Action系と同じ排他パターン)。
+    // レイヤー構成を丸ごと作り直す破壊的な操作なので、他の編集アクションは実行前に確定せずキャンセルする(他のstart*Action系と同じ排他パターン)。
     actions_.cancelActive(); // 変形/色調整/フィルター/レイヤー編集系(controller管理アクション)は互いに排他
 
     makeCurrent();
@@ -592,16 +522,7 @@ bool CanvasWidget::flipCanvasBy(bool horizontal, bool vertical)
     return true;
 }
 
-// ===========================================================================
 // 画像解像度変更(編集アクション「画像解像度変更」の確定処理)
-// ---------------------------------------------------------------------------
-// キャンバスサイズ変更(resizeCanvasKeepingContent)と違い、内容を新キャンバス上の
-// 同じ位置に置くのではなく、新しい解像度いっぱいに拡大縮小(リサンプル)して置く
-// (見た目の縦横比・表示上のサイズは変えず、ピクセル密度だけを変える)。
-// Undoの仕組みはキャンバスサイズ変更と全く同じ CanvasResize エントリを流用する
-// (beforeLayers/afterLayersが自己完結した全体スナップショットなので、
-// 「配置方法が offset か 拡大縮小 か」の違いはUndo/Redo適用時には関係ない)。
-// ===========================================================================
 bool CanvasWidget::resampleCanvasResolution(int newW, int newH)
 {
     if (newW <= 0 || newH <= 0) return false;
@@ -614,7 +535,6 @@ bool CanvasWidget::resampleCanvasResolution(int newW, int newH)
     const int savedActiveIndex = doc_->activeLayerIndex();
 
     // 各レイヤーの内容を新しい解像度いっぱいに拡大縮小してから配置する
-    // (offsetX=offsetY=0で、既に新サイズちょうどに合わせた画像をそのまま貼るだけでよい)
     QVector<LayerSnapshotData> scaledLayers = beforeLayers;
     for (LayerSnapshotData &snap : scaledLayers)
         snap.image = snap.image.scaled(newW, newH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
